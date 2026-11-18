@@ -23,22 +23,30 @@
 #include "CrossPointSettings.h"
 #include "Epub/blocks/ImageBlock.h"
 #include "Epub/converters/JpegToFramebufferConverter.h"
+#include "Epub/converters/PngToFramebufferConverter.h"
+#include "FontDecompressor.h"
+#include "JpegToBmpConverter.h"
+#include "PngToBmpConverter.h"
 #include "QrParams.h"
 #include "ReaderGrayProbe.h"
 #include "SleepProbe.h"
 #include "ViewerProbe.h"
 #include "components/themes/BaseTheme.h"
+#include "util/NativeGrayscaleFrame.h"
 #include "util/SleepCover.h"
 
-// Native rendering bypasses ImageBlock; the four-level seam checks error forwarding.
+static ImageRenderError legacyError = ImageRenderError::Failed;
+#ifndef TEST_IMAGE_BLOCK_PIPELINE
+// The default suite checks legacy error forwarding; the pipeline binary links
+// the production ImageBlock and decoder instead.
 ImageBlock::ImageBlock(const std::string&, const std::string&, int16_t, int16_t) : width(0), height(0) {}
 void ImageBlock::releaseRenderCache() {}
 void ImageBlock::clearSessionRenderFailures() {}
-static ImageRenderError legacyError = ImageRenderError::Failed;
 bool ImageBlock::render(GfxRenderer&, int, int, PixelCachePolicy, ImageRenderError* error) {
   if (error) *error = legacyError;
   return false;
 }
+#endif
 static HalMemory::HeapStats availableHeap{6236320, 8373520, 0, 4980724};
 HalMemory::HeapStats HalMemory::getDefaultHeap() { return availableHeap; }
 HalMemory::HeapStats HalMemory::getInternalHeap() { return {33087, 283859, 9796, 11252}; }
@@ -51,6 +59,12 @@ void* operator new(size_t size, const std::nothrow_t&) noexcept {
 bool FontCacheManager::isScanning() const { return false; }
 void FontCacheManager::clearCache() {}
 void SdCardFont::clearCache() {}
+void FontCacheManager::recordText(const char*, int, EpdFontFamily::Style) {}
+SdCardFont* SdCardFont::fromMissCtx(void*) { return nullptr; }
+int SdCardFont::prewarm(const char*, uint8_t, bool, bool, bool) { return 0; }
+bool SdCardFont::isOverflowGlyph(const EpdGlyph*) const { return false; }
+const uint8_t* SdCardFont::getOverflowBitmap(const EpdGlyph*) const { return nullptr; }
+const uint8_t* FontDecompressor::getBitmap(const EpdFontData*, const EpdGlyph*, uint32_t) { return nullptr; }
 ESPMock ESP;
 HWCDC Serial;
 namespace {
@@ -59,11 +73,15 @@ std::array<uint8_t, HalDisplay::DISPLAY_WIDTH * HalDisplay::DISPLAY_HEIGHT / 2> 
 uint8_t levels = 16;
 bool loan = false, failRefresh = false, failAllocation = false;
 int commits = 0, cancels = 0;
+bool nativeCycle = false;
+HalDisplay::RefreshMode nativeMode = HalDisplay::FAST_REFRESH;
 std::vector<char> refreshEvents;
 }  // namespace
+#ifndef TEST_IMAGE_BLOCK_PIPELINE
 void* operator new[](size_t size, const std::nothrow_t&) noexcept {
   return failAllocation ? nullptr : std::malloc(size);
 }
+#endif
 HalDisplay::HalDisplay() {}
 HalDisplay::~HalDisplay() {}
 uint8_t* HalDisplay::getFrameBuffer() const { return bw.data(); }
@@ -97,6 +115,11 @@ bool HalDisplay::commitGrayscale16() {
   ++commits;
   refreshEvents.push_back('C');
   return !failRefresh;
+}
+bool HalDisplay::supportsNativeGrayscaleRefreshCycle() const { return nativeCycle; }
+bool HalDisplay::commitGrayscale16(RefreshMode mode) {
+  nativeMode = mode;
+  return commitGrayscale16();
 }
 void HalDisplay::cancelGrayscale16() {
   loan = false;
@@ -270,12 +293,48 @@ void testFourLevelBitmapPaths(GfxRenderer& renderer) {
 }
 }  // namespace
 
+#ifdef TEST_IMAGE_BLOCK_PIPELINE
+const uint8_t* imageBlockNativePixels() { return native.data(); }
+#define main nativeGrayscaleSuiteMain
+#endif
 int main(int argc, char** argv) {
   assert(argc == 3);
   refreshEvents.reserve(256);
   setenv("CROSSPOINT_SIM_SD", argv[2], 1);
   GfxRenderer renderer(display);
   renderer.begin();
+  nativeCycle = true;
+  assert(renderer.beginGrayscale16());
+  renderer.requestNextFullRefresh();
+  assert(renderer.commitGrayscale16(HalDisplay::FAST_REFRESH));
+  assert(nativeMode == HalDisplay::FULL_REFRESH);
+  assert(renderer.beginGrayscale16());
+  assert(renderer.commitGrayscale16(HalDisplay::FAST_REFRESH));
+  assert(nativeMode == HalDisplay::FAST_REFRESH);
+  {
+    NativeGrayscaleFrame frame(renderer, true);
+    assert(frame.active());
+    renderer.setOrientation(GfxRenderer::LandscapeCounterClockwise);
+    renderer.drawGrayscale16Pixel(0, 0, 0);
+    renderer.clearScreen();
+    assert(tone(0, 0) == 15);
+    auto data = ramp(false, true);
+    Bitmap bitmap(data.data(), data.size());
+    assert(bitmap.parseHeaders() == BmpReaderError::Ok);
+    assert(renderer.drawBitmap(bitmap, 0, 0, 17, 2));
+    for (int i = 0; i < 16; ++i) assert(tone(i, 0) == 15 - i);
+    const int before = commits;
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+    assert(commits == before + 1 && !frame.active());
+  }
+  const int beforeAbandon = commits;
+  {
+    NativeGrayscaleFrame frame(renderer, true);
+    assert(frame.active());
+  }
+  assert(commits == beforeAbandon && !loan);
+  renderer.setOrientation(GfxRenderer::Portrait);
+  nativeCycle = false;
   // Overlay gray restores the retained B/W frame; absolute gray keeps its baseline.
   bw.fill(0xA5);
   {
@@ -369,6 +428,19 @@ int main(int argc, char** argv) {
   std::ofstream copied(std::string(argv[2]) + "/ramp.jpg", std::ios::binary);
   copied << source.rdbuf();
   copied.close();
+  const uint8_t fontBitmap[] = {0x1b};  // Four two-bit coverage samples.
+  const EpdGlyph fontGlyphs[] = {{4, 1, 64, 0, 1, 1, 0}};
+  const EpdUnicodeInterval fontIntervals[] = {{'A', 'A', 0}};
+  EpdFontData fontData{};
+  fontData.bitmap = fontBitmap;
+  fontData.glyph = fontGlyphs;
+  fontData.intervals = fontIntervals;
+  fontData.intervalCount = 1;
+  fontData.advanceY = 1;
+  fontData.ascender = 1;
+  fontData.is2Bit = true;
+  const EpdFont font(&fontData);
+  renderer.insertFont(42, EpdFontFamily(1, &font));
   JpegToFramebufferConverter jpeg;
   RenderConfig config{};
   config.x = 0;
@@ -381,6 +453,90 @@ int main(int argc, char** argv) {
   assert(renderer.beginGrayscale16());
   assert(jpeg.decodeToFramebuffer("/ramp.jpg", renderer, config));
   for (int i = 0; i < 16; ++i) assert(tone(i * 8 + 4, 8) == i);
+  // The same production-rendered frame retains16 image tones and4 glyph tones.
+  renderer.drawText(42, 0, 20, "A");
+  assert(tone(0, 20) == 15 && tone(1, 20) == 10 && tone(2, 20) == 5 && tone(3, 20) == 0);
+  for (int i = 0; i < 16; ++i) assert(tone(i * 8 + 4, 8) == i);
+  renderer.setNativeTextAntiAliasing(false);
+  renderer.drawText(42, 8, 20, "A");
+  for (int x = 8; x < 12; ++x) assert(tone(x, 20) == 0 || tone(x, 20) == 15);
+  renderer.setNativeTextAntiAliasing(true);
+  renderer.cancelGrayscale16();
+  renderer.setDitherImagesInBw(true);
+  assert(renderer.beginGrayscale16());
+  assert(jpeg.decodeToFramebuffer("/ramp.jpg", renderer, config));
+  for (int y = 0; y < 16; ++y)
+    for (int x = 0; x < 128; ++x) assert(tone(x, y) == 0 || tone(x, y) == 15);
+  renderer.drawGrayscale16Pixel(0, 0, 119);  // Text coverage remains gray even when images are BW.
+  assert(tone(0, 0) == 7);
+  renderer.cancelGrayscale16();
+  renderer.setDitherImagesInBw(false);
+  PngToFramebufferConverter png;
+  assert(!png.decodeToFramebuffer("/ramp.png", renderer, config));
+  for (bool bilinear : {false, true}) {
+    config.bilinearScaling = bilinear;
+    assert(renderer.beginGrayscale16());
+    assert(png.decodeToFramebuffer("/ramp.png", renderer, config));
+    for (int i = 0; i < 16; ++i) assert(tone(i * 8 + 4, 8) == i);
+    renderer.cancelGrayscale16();
+    config.useExactDimensions = true;
+    config.maxWidth = 64;
+    config.maxHeight = 8;
+    assert(renderer.beginGrayscale16());
+    assert(png.decodeToFramebuffer("/ramp.png", renderer, config));
+    for (int i = 0; i < 16; ++i) assert(tone(i * 4 + 1, 3) == i);
+    renderer.cancelGrayscale16();
+    config.maxWidth = 128;
+    config.maxHeight = 16;
+  }
+  {
+    // A wide PNG must fit inside a portrait preview, never expand beyond the
+    // Bitmap reader's source width limit (the Plus trace was 2594 > 2048).
+    const bool previousCycle = nativeCycle;
+    nativeCycle = true;
+    renderer.setOrientation(GfxRenderer::Portrait);
+    ImageViewerProbe viewer(renderer);
+    viewer.filePath = "/wide.png";
+    assert(Storage.ensureDirectoryExists("/.crosspoint"));
+    assert(viewer.preparePreview());
+    HalFile preview;
+    assert(Storage.openFileForRead("TEST", "/.crosspoint/image_preview.bmp", preview));
+    Bitmap bitmap(preview);
+    assert(bitmap.parseHeaders() == BmpReaderError::Ok);
+    assert(bitmap.getWidth() == 32 && bitmap.getHeight() == 1);
+    nativeCycle = previousCycle;
+    renderer.setOrientation(GfxRenderer::LandscapeCounterClockwise);
+  }
+  for (bool pngCover : {false, true}) {
+    {
+      HalFile input, output;
+      assert(Storage.openFileForRead("TEST", pngCover ? "/ramp.png" : "/ramp.jpg", input));
+      assert(Storage.openFileForWrite("TEST", "/gray-cover.bmp", output));
+      assert(pngCover ? PngToBmpConverter::pngFileToBmpStreamWithSize(input, output, 128, 16,
+                                                                      PngToBmpConverter::Output::Gray8)
+                      : JpegToBmpConverter::jpegFileToBmpStreamWithSize(input, output, 128, 16, false,
+                                                                        JpegToBmpConverter::Output::Gray8));
+    }
+    HalFile file;
+    assert(Storage.openFileForRead("TEST", "/gray-cover.bmp", file));
+    Bitmap bitmap(file);
+    assert(bitmap.parseHeaders() == BmpReaderError::Ok);
+    assert(renderer.beginGrayscale16());
+    assert(renderer.drawBitmapGrayscale16(bitmap, 0, 0, 128, 16));
+    for (int i = 0; i < 16; ++i) assert(tone(i * 8 + 4, 8) == i);
+    renderer.cancelGrayscale16();
+  }
+  config.bilinearScaling = false;
+  renderer.setDitherImagesInBw(true);
+  assert(renderer.beginGrayscale16());
+  assert(png.decodeToFramebuffer("/ramp.png", renderer, config));
+  for (int y = 0; y < 16; ++y)
+    for (int x = 0; x < 128; ++x) assert(tone(x, y) == 0 || tone(x, y) == 15);
+  renderer.cancelGrayscale16();
+  renderer.setDitherImagesInBw(false);
+  config.useExactDimensions = false;
+  assert(renderer.beginGrayscale16());
+  assert(jpeg.decodeToFramebuffer("/ramp.jpg", renderer, config));
   failRefresh = true;
   const int cancelsBeforeFailedCommit = cancels;
   assert(!renderer.commitGrayscale16() && !renderer.isGrayscale16Active());
@@ -414,9 +570,32 @@ int main(int argc, char** argv) {
     assert(width == 64 && height == 16 && cache.size() == 4 + 16 * 16);
   }
   ImageViewerProbe viewer(renderer);
+  for (bool allocationFailure : {false, true}) {
+    auto data = ramp(true, false);
+    if (!allocationFailure) data.pop_back();
+    Bitmap bitmap(data.data(), data.size());
+    assert(bitmap.parseHeaders() == BmpReaderError::Ok);
+    refreshEvents.clear();
+    assert(renderer.beginGrayscale16());
+    failAllocation = allocationFailure;
+    assert(!viewer.renderNativeBitmap(bitmap, 0, 0));
+    failAllocation = false;
+    assert(!loan && !viewer.nativeRefreshFailed);
+    assert((refreshEvents == std::vector<char>{'B', 'X', 'H'}));
+  }
   const int actionsBefore = viewerGui.actions;
-  assert(viewer.renderJpeg());
+  viewer.imageReady = viewer.renderJpeg();
+  assert(viewer.imageReady);
   assert(viewerGui.actions > actionsBefore && !renderer.isGrayscale16Active());
+  nativeCycle = true;
+  failRefresh = true;
+  const int beforeViewerFailure = commits;
+  refreshEvents.clear();
+  assert(!viewer.renderJpeg() && viewer.nativeRefreshFailed);
+  assert(commits == beforeViewerFailure + 1 && !loan);
+  assert((refreshEvents == std::vector<char>{'B', 'C', 'X'}));
+  failRefresh = false;
+  nativeCycle = false;
   viewer.doSetSleepCover("/ramp.jpg", false);
   {
     HalFile cover;
@@ -615,6 +794,18 @@ int main(int argc, char** argv) {
   assert(airpage::AirPageWallpaper::install(selected));
   assert(airpage::AirPageImageStore::inspectImage("/sleep.bmp", retained) && retained.width == 17);
   SleepProbe sleepProbe(renderer);
+  {
+    auto bytes = ramp(true, false);
+    Bitmap bitmap(bytes.data(), bytes.size());
+    assert(bitmap.parseHeaders() == BmpReaderError::Ok);
+    nativeCycle = true;
+    failRefresh = true;
+    const int beforeSleepFailure = commits;
+    sleepProbe.renderBitmapSleepScreen(bitmap);
+    assert(commits == beforeSleepFailure + 1 && sleepProbe.defaults == 0 && !loan);
+    failRefresh = false;
+    nativeCycle = false;
+  }
   const int beforeSleep = commits;
   sleepProbe.renderCustomSleepScreen();
   assert(commits == beforeSleep + 1 && sleepProbe.defaults == 0 && !loan);
@@ -680,4 +871,5 @@ int main(int argc, char** argv) {
   printf(
       "Shared sleep-cover legacy/marked recovery, same-mode rollback, mode restoration, retry and validation passed\n");
   testReaderGrayContract(renderer);
+  return 0;
 }

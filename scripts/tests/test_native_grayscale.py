@@ -4,6 +4,8 @@ import platform
 import subprocess
 import sys
 import tempfile
+import struct
+import zlib
 from native_reader_gray_contract import prepare as prepare_reader_contract
 from test_reading_ui_regressions import method
 
@@ -18,8 +20,20 @@ def main():
     if not (JPEG / 'JPEGDEC.cpp').is_file():
         raise SystemExit('Configure host tests or build a firmware environment to provide the existing JPEGDEC dependency.')
 
+    PNG = ROOT / 'build/test/_deps/pngdec-src/src'
+    if not (PNG / 'PNGdec.cpp').is_file():
+        raise SystemExit('Configure host tests to provide the existing PNGdec dependency.')
+
     with tempfile.TemporaryDirectory(prefix='native-gray-') as temp:
         work = Path(temp)
+        def chunk(kind, data):
+            return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+        png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 128, 16, 8, 0, 0, 0, 0))
+        png += chunk(b'IDAT', zlib.compress(b''.join(b'\0' + bytes(x // 8 * 17 for x in range(128)) for _ in range(16))))
+        (work / 'ramp.png').write_bytes(png + chunk(b'IEND', b''))
+        wide = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 512, 24, 8, 0, 0, 0, 0))
+        wide += chunk(b'IDAT', zlib.compress(b''.join(b'\0' + bytes(x // 32 * 17 for x in range(512)) for _ in range(24))))
+        (work / 'wide.png').write_bytes(wide + chunk(b'IEND', b''))
         # Keep the simulator's complete HAL declarations so the entire production
         # renderer compiles; only the native transaction/geometry seams are replaced.
         hal = (SIM / 'src/HalDisplay.h').read_text().replace('EInkDisplay einkDisplay;', '')
@@ -30,6 +44,7 @@ def main():
           bool commitGrayscale16();
           void cancelGrayscale16();
           void begin();''')
+        hal = hal.replace('  void begin();', '  bool commitGrayscale16(RefreshMode);\n  bool supportsNativeGrayscaleRefreshCycle() const;\n  void begin();')
         (work / 'HalDisplay.h').write_text(hal)
         (work / 'Logging.h').write_text('#pragma once\n#define LOG_DBG(...) ((void)0)\n#define LOG_ERR(...) ((void)0)\n#define LOG_INF(...) ((void)0)\n')
         settings = """#pragma once
@@ -86,12 +101,14 @@ def main():
         viewer = (ROOT / 'src/activities/util/ImageViewerActivity.cpp').read_text()
         constants = viewer[viewer.index('constexpr const char* IMAGE_PREVIEW_PATH'):viewer.index('Rect sleepCoverActionRect')]
         methods = '\n'.join(method(viewer, name) for name in (
-            'RenderConfig fitImage(', 'bool ImageViewerActivity::renderJpeg(',
+            'RenderConfig fitImage(', 'bool ImageViewerActivity::preparePreview(', 'bool ImageViewerActivity::renderJpeg(', 'bool ImageViewerActivity::renderNativeBitmap(', 'void ImageViewerActivity::renderImageFailure(',
             'bool ImageViewerActivity::prepareJpegSleepCover(', 'void ImageViewerActivity::doSetSleepCover('))
         viewer_probe = r"""
 #include <Memory.h>
 #include <FsHelpers.h>
 #include "components/Rect.h"
+#include "fontIds.h"
+constexpr int STR_FILE_OPEN_FAILED=5;
 constexpr int STR_BACK=0, STR_SET_SLEEP_COVER=1, STR_LOADING_POPUP=2, STR_DONE=3, STR_FAILED_LOWER=4;
 inline const char* tr(int) { return ""; }
 struct ViewerGui {
@@ -102,9 +119,7 @@ struct ViewerGui {
 } viewerGui;
 #define GUI viewerGui
 inline Rect sleepCoverActionRect(const GfxRenderer& renderer) { return Rect(0,0,renderer.getScreenWidth(),8); }
-struct PngToBmpConverter {
-  static bool pngFileToTransparentBmpFile(const char*,const char*,bool) { return false; }
-};
+#include <PngToBmpConverter.h>
 struct ViewerInput {
   struct Labels { const char* btn1;const char* btn2;const char* btn3;const char* btn4; };
   bool touch=true;
@@ -120,28 +135,38 @@ class ImageViewerProbe {
   std::vector<std::string> siblingImages;
   int currentImageIndex=-1;
   bool imageReady=true;
+  bool nativeRefreshFailed=false;
+  bool preparePreview();
   bool renderJpeg();
+  void renderImageFailure();
+  bool renderNativeBitmap(const Bitmap&,int,int);
   bool prepareJpegSleepCover();
   void doSetSleepCover(const char*,bool);
 };
 """
         (work / 'ViewerProbe.h').write_text(viewer_probe + constants + methods.replace('ImageViewerActivity::','ImageViewerProbe::'))
         reader_driver = prepare_reader_contract(work, ROOT)
-        includes = [work, work/'reader-driver/include', JPEG, SIM / 'src', ROOT / 'lib/hal', ROOT / 'lib/GfxRenderer', ROOT / 'lib/EpdFont',
+        includes = [work, work/'reader-driver/include', JPEG, PNG, SIM / 'src', ROOT / 'lib/hal', ROOT / 'lib/GfxRenderer', ROOT / 'lib/EpdFont',
                     ROOT / 'lib/Epub', ROOT / 'lib/Memory', ROOT / 'lib/Utf8', ROOT / 'lib/MiniBidi',
                     ROOT / 'lib/InflateReader', ROOT / 'lib/ZipFile', ROOT / 'lib/Serialization',
-                    ROOT / 'lib/uzlib/src', ROOT / 'lib/FsHelpers', ROOT / 'lib/JpegToBmpConverter', ROOT / 'src', ROOT / 'src/activities/apps/airpage']
+                    ROOT / 'lib/uzlib/src', ROOT / 'lib/FsHelpers', ROOT / 'lib/JpegToBmpConverter', ROOT / 'lib/PngToBmpConverter', ROOT / 'lib/miniz/src', ROOT / 'src', ROOT / 'src/activities/apps/airpage']
         sources = [ROOT / name for name in (
             'test/native_grayscale/NativeGrayscaleTest.cpp', 'src/activities/reader/ReaderSession.cpp', 'lib/GfxRenderer/GfxRenderer.cpp',
             'lib/GfxRenderer/Bitmap.cpp', 'lib/GfxRenderer/BitmapHelpers.cpp',
+            'lib/EpdFont/EpdFont.cpp', 'lib/EpdFont/EpdFontFamily.cpp', 'lib/Utf8/Utf8.cpp', 'lib/MiniBidi/BidiUtils.cpp',
             'lib/Epub/Epub/converters/JpegToFramebufferConverter.cpp',
+            'lib/Epub/Epub/converters/PngToFramebufferConverter.cpp',
             'lib/Epub/Epub/converters/ImageToFramebufferDecoder.cpp',
-            'lib/JpegToBmpConverter/JpegToBmpConverter.cpp', 'lib/FsHelpers/FsHelpers.cpp', 'lib/Memory/BuildScratch.cpp',
+            'lib/JpegToBmpConverter/JpegToBmpConverter.cpp', 'lib/PngToBmpConverter/PngToBmpConverter.cpp', 'lib/miniz/src/InflateStream.cpp', 'lib/FsHelpers/FsHelpers.cpp', 'lib/Memory/BuildScratch.cpp',
             'lib/Epub/Epub/converters/ImageDimsProbe.cpp',
             'src/activities/apps/airpage/AirPageImageRenderer.cpp',
             'src/activities/apps/airpage/AirPageImageStore.cpp',
             'src/activities/apps/airpage/AirPageWallpaper.cpp', 'src/util/SleepCover.cpp')]
-        sources += [reader_driver, JPEG / 'JPEGDEC.cpp', SIM / 'src/HalStorage.cpp']
+        sources += [reader_driver, JPEG / 'JPEGDEC.cpp', PNG / 'PNGdec.cpp', SIM / 'src/HalStorage.cpp']
+        for c_source in [*PNG.glob('*.c'), ROOT / 'lib/miniz/src/miniz_impl.c', ROOT / 'lib/MiniBidi/minibidi.c']:
+            obj = work / (c_source.stem + '.o')
+            subprocess.run(['cc', '-O1', '-D__LINUX__', '-I' + str(PNG), '-c', str(c_source), '-o', str(obj)], check=True)
+            sources.append(obj)
         flags = ['-std=c++20', '-O1', '-ffunction-sections', '-fdata-sections', '-DCROSSPOINT_EMULATED=1',
                  '-DDESTRUCTOR_CLOSES_FILE=1', '-D__LINUX__=1', '-DSIMULATOR=1']
         flags += ['-DFREEINK_DRIVER_EPDIY_LCD=1','-DFREEINK_EPDIY_LCD_CONFIG=readerContractConfig']
@@ -152,6 +177,16 @@ class ImageViewerProbe {
         binary = work / 'test'
         subprocess.run([CXX, *flags, *map(str, sources), '-o', str(binary)], check=True)
         subprocess.run([str(binary), str(ROOT / 'test/native_grayscale/gray16.jpg'), str(work)], check=True)
+        # Exercise the production ImageBlock too: native decoders cannot keep
+        # the preceding B/W pass's PXC chunks pinned in the fragmented heap.
+        pipeline = work / 'image-block-pipeline'
+        pipeline_flags = [f for f in flags if f not in ('-DREADER_TEST_WRAP_MALLOC=1', '-Wl,--wrap=malloc', '-Wl,--wrap=free')]
+        if platform.system() == 'Linux':
+            pipeline_flags += ['-Wl,--wrap=calloc', '-Wl,--wrap=free']
+        subprocess.run([CXX, *pipeline_flags, '-DTEST_IMAGE_BLOCK_PIPELINE=1', *map(str, sources),
+                        str(ROOT / 'test/native_grayscale/ImageBlockPipelineTest.cpp'),
+                        str(ROOT / 'lib/Epub/Epub/blocks/ImageBlock.cpp'), '-o', str(pipeline)], check=True)
+        subprocess.run([str(pipeline), str(work)], check=True)
 
     print('Native BMP/JPEG, orientations, cancellation, OOM, AirPage and sleep/wallpaper transactions passed')
 

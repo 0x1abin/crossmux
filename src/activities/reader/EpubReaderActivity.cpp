@@ -3055,16 +3055,22 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   }
   const auto tPrewarm = millis();
 
+  renderer.setNativeTextAntiAliasing(SETTINGS.textAntiAliasing);
+  const ScopedCleanup restoreNativeTextAa{[this] { renderer.setNativeTextAntiAliasing(true); }};
   const bool manualRefreshPending = forcedRefreshPending;
   forcedRefreshPending = false;
   const bool cleanImageBasePending = manualRefreshPending || pagesUntilFullRefresh <= 1;
   // Night mode renders crisp B/W; the SDK disables every grayscale display path.
   const bool grayscaleEnabled = !renderer.isInverted() && renderer.grayscaleCapabilities().supported();
   const bool needsTextGrayscale = grayscaleEnabled && SETTINGS.textAntiAliasing;
-  // Images write the BW buffer directly; keep them, backgrounds and faux bold on the existing path.
-  const bool use16LevelText = needsTextGrayscale && !pageHasImages && renderer.getGrayscaleLevels() == 16 &&
-                              sdFontSystem.readerFaceIsFourBit() && !SETTINGS.readingBackgroundEnabled &&
-                              SETTINGS.fakeBold == 0;
+  // Plus image pages decode into the same target as four-bit text. Other native
+  // drivers retain their text-only path; styled backgrounds/bold keep the mask path.
+  const bool use16LevelText = grayscaleEnabled && (needsTextGrayscale || pageHasImages) &&
+                              (!pageHasImages || renderer.supportsNativeGrayscaleRefreshCycle()) &&
+                              renderer.getGrayscaleLevels() == 16 &&
+                              (sdFontSystem.readerFaceIsFourBit() || !needsTextGrayscale ||
+                               (pageHasImages && renderer.supportsNativeGrayscaleRefreshCycle())) &&
+                              !SETTINGS.readingBackgroundEnabled && SETTINGS.fakeBold == 0;
   const bool needsAnyGrayscale =
       grayscaleEnabled && (needsTextGrayscale || (pageHasImages && !renderer.grayscaleReplacesFrame()));
   const bool absoluteImageGrayscale = grayscaleEnabled && pageHasImages && !gpio.deviceIsX3() &&
@@ -3165,8 +3171,8 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     // 多推一次会变成两次面板驱动（更闪、更慢），而 16 级用的本身就是整屏波形，残影照清。
     // / 16-level text: the single commitGrayscale16() below drives the panel with the whole
     // frame, so the base is deliberately NOT pushed here. Pushing it would drive the panel
-    // twice (more flash, more time), and the 16-level waveform is a full-screen one anyway,
-    // so ghosting is still cleared.
+    // twice (more flash, more time). Native-cycle drivers choose the requested cleaning
+    // or ordinary gray waveform at commit; legacy native drivers retain their policy.
   } else if (combinedGrayscaleBase) {
     ReaderUtils::displayBaseWithRefreshCycle(renderer, pagesUntilFullRefresh, manualRefreshPending);
   } else if (pageHasImages) {
@@ -3199,11 +3205,14 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         renderer.cancelGrayscale16();
         return false;
       }
-      if (renderer.commitGrayscale16()) {
+      if (ReaderUtils::commitNativeWithRefreshCycle(renderer, pagesUntilFullRefresh, manualRefreshPending)) {
         const auto tEnd = millis();
         LOG_DBG("ERS", "Page render: 16-level text total=%lums", tEnd - t0);
-        pagesUntilFullRefresh = 1;
         return finish();
+      }
+      if (renderer.supportsNativeGrayscaleRefreshCycle()) {
+        LOG_ERR("ERS", "Native text commit failed; preserving Full debt for the next request");
+        return false;
       }
       LOG_ERR("ERS", "16-level text commit failed; displaying B/W");
     } else {

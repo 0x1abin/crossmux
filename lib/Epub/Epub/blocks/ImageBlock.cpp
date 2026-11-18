@@ -1,6 +1,7 @@
 #include "ImageBlock.h"
 
 #include <FontCacheManager.h>
+#include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -370,7 +371,9 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
 
 bool ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const PixelCachePolicy cachePolicy,
                         ImageRenderError* error) {
-  return renderInternal(renderer, x, y, cachePolicy, DecodeOutput::FrameBufferAndCache, error);
+  return renderInternal(
+      renderer, x, y, cachePolicy,
+      renderer.isGrayscale16Active() ? DecodeOutput::NativeGrayscale16 : DecodeOutput::FrameBufferAndCache, error);
 }
 
 bool ImageBlock::cacheDecodedImage(GfxRenderer& renderer, const int x, const int y, CancelCheck cancellation) {
@@ -385,7 +388,8 @@ bool ImageBlock::renderInternal(GfxRenderer& renderer, const int x, const int y,
   }
   ImageRenderError decodeError = ImageRenderError::Failed;
   if (error) *error = ImageRenderError::Failed;
-  const bool renderToFramebuffer = output == DecodeOutput::FrameBufferAndCache;
+  const bool native = output == DecodeOutput::NativeGrayscale16;
+  const bool renderToFramebuffer = output != DecodeOutput::CacheOnly;
 
   // The font-prewarm scan pass only accumulates glyphs; an image contributes
   // none, and its DirectPixelWriter output bypasses the renderer's scan-mode
@@ -428,7 +432,7 @@ bool ImageBlock::renderInternal(GfxRenderer& renderer, const int x, const int y,
 
   // Try to render from cache first
   std::string cachePath = getCachePath(imagePath);
-  if (renderToFramebuffer && renderFromCache(renderer, cachePath, x, y, width, height, cachePolicy)) {
+  if (renderToFramebuffer && !native && renderFromCache(renderer, cachePath, x, y, width, height, cachePolicy)) {
     if (error) *error = ImageRenderError::None;
     return true;
   }
@@ -436,6 +440,10 @@ bool ImageBlock::renderInternal(GfxRenderer& renderer, const int x, const int y,
     if (error) *error = ImageRenderError::None;
     return true;
   }
+
+  // Native decoding bypasses the four-level cache. Release the preceding B/W
+  // pass's chunks before PNGdec needs a large contiguous allocation.
+  if (native) releasePxcSlot();
 
   // The build only header-probed the image for dimensions; pull the actual
   // file out of the book now, on first visit to the page.
@@ -479,9 +487,9 @@ bool ImageBlock::renderInternal(GfxRenderer& renderer, const int x, const int y,
   config.useGrayscale = true;
   config.useDithering = true;
   config.performanceMode = false;
-  config.useExactDimensions = true;  // Use pre-calculated dimensions to avoid rounding mismatches
-  config.cachePath = cachePath;      // Enable caching during decode
-  config.output = output;
+  config.useExactDimensions = true;            // Use pre-calculated dimensions to avoid rounding mismatches
+  config.cachePath = native ? "" : cachePath;  // PXC stores only four levels.
+  config.output = native && FsHelpers::hasGifExtension(imagePath) ? DecodeOutput::FrameBufferAndCache : output;
   config.bilinearScaling = bilinearScalingEnabled();
   config.error = &decodeError;
   config.cancellation = cancellation;

@@ -32,6 +32,25 @@ inline HalDisplay::RefreshMode consumeRefreshMode(int& pagesUntilFullRefresh, bo
   return mode;
 }
 
+// Do not publish a consumed native cadence until hardware commits. A failed
+// commit leaves Full debt for the next request, never an immediate B/W retry.
+template <typename Renderer>
+inline bool commitNativeWithRefreshCycle(const Renderer& renderer, int& pagesUntilFullRefresh, bool manualRefresh) {
+  if (!renderer.supportsNativeGrayscaleRefreshCycle()) {
+    const bool committed = renderer.commitGrayscale16();
+    pagesUntilFullRefresh = 1;  // Preserve the legacy native-driver policy.
+    return committed;
+  }
+  int next = manualRefresh ? 1 : pagesUntilFullRefresh;
+  const auto mode = consumeRefreshMode(next);
+  if (!renderer.commitGrayscale16(mode)) {
+    pagesUntilFullRefresh = 1;
+    return false;
+  }
+  pagesUntilFullRefresh = next;
+  return true;
+}
+
 // One helper, blocking or deferred: the async form starts the refresh and
 // returns so the caller can overlap CPU work with the panel's refresh time.
 // Async callers must not touch the framebuffer until

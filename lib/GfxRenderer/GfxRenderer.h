@@ -87,6 +87,7 @@ class GfxRenderer {
   // One-shot refresh-mode override consumed by the next displayBuffer() call.
   // Lets an activity force e.g. a HALF_REFRESH for a single frame (used by the
   // reading-stats screens) without threading the mode through every render path.
+  bool nativeTextAntiAliasing = true;
   mutable bool nextRefreshOverridePending = false;
   mutable HalDisplay::RefreshMode nextRefreshOverride = HalDisplay::FAST_REFRESH;
   std::vector<uint8_t*> bwBufferChunks;
@@ -566,9 +567,14 @@ class GfxRenderer {
   uint16_t getDisplayHeight() const { return panelHeight; }
   uint8_t getGrayscaleLevels() const;
   bool beginGrayscale16();
+  bool nativeTextAntiAliasingEnabled() const { return nativeTextAntiAliasing; }
+  void setNativeTextAntiAliasing(bool enabled) { nativeTextAntiAliasing = enabled; }
   bool commitGrayscale16() const;
+  bool commitGrayscale16(HalDisplay::RefreshMode mode) const;
+  bool supportsNativeGrayscaleRefreshCycle() const;
   void cancelGrayscale16() const;
   bool isGrayscale16Active() const { return grayscale16Buffer != nullptr; }
+  void drawImageGrayscale16Pixel(int x, int y, uint8_t gray) const;
   void drawGrayscale16Pixel(int x, int y, uint8_t gray) const;
   bool drawBitmapGrayscale16(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight, float cropX = 0,
                              float cropY = 0) const;

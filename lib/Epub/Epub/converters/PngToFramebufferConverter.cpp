@@ -324,6 +324,10 @@ void emitBilinearRow(PngContext& ctx, const int dstY, const uint8_t* rowTop, con
     if (outX >= ctx.screenWidth) continue;
     const uint8_t alpha = ctx.alphaLineBuffer ? ctx.alphaLineBuffer[x0] : 255;
     if (alpha < 8 || alpha <= alphaThreshold4x4(outX, outY)) continue;
+    if (ctx.config->output == DecodeOutput::NativeGrayscale16) {
+      ctx.renderer->drawImageGrayscale16Pixel(outX, outY, sample);
+      continue;
+    }
     uint8_t ditheredGray;
     if (useDithering) {
       ditheredGray = applyBayerDither4Level(sample, outX, outY);
@@ -456,14 +460,18 @@ int pngDrawCallback(PNGDRAW* pDraw) {
         if (alpha >= 8 && alpha > alphaThreshold4x4(outX, outY)) {
           uint8_t gray = ctx->grayLineBuffer[srcX];
 
-          uint8_t ditheredGray;
-          if (useDithering) {
-            ditheredGray = applyBayerDither4Level(gray, outX, outY);
+          if (ctx->config->output == DecodeOutput::NativeGrayscale16) {
+            ctx->renderer->drawImageGrayscale16Pixel(outX, outY, gray);
           } else {
-            ditheredGray = gray >> 6;
+            uint8_t ditheredGray;
+            if (useDithering) {
+              ditheredGray = applyBayerDither4Level(gray, outX, outY);
+            } else {
+              ditheredGray = gray >> 6;
+            }
+            if (writeFramebuffer) pw.writePixel(outX, ditheredGray, ctx->alphaLineBuffer != nullptr);
+            if (caching) cw.writePixel(outX, ditheredGray);
           }
-          if (writeFramebuffer) pw.writePixel(outX, ditheredGray, ctx->alphaLineBuffer != nullptr);
-          if (caching) cw.writePixel(outX, ditheredGray);
         }
       }
 
@@ -510,6 +518,8 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   }
   LOG_DBG("PNG", "Decoding PNG: %s", imagePath.c_str());
 
+  const bool native = config.output == DecodeOutput::NativeGrayscale16;
+  if (native && (!renderer.isGrayscale16Active() || !config.cachePath.empty())) return false;
   const bool cacheOnly = config.output == DecodeOutput::CacheOnly;
   if (cacheOnly && config.cachePath.empty()) {
     LOG_ERR("PNG", "Cache-only decode requires a cache path");
@@ -517,7 +527,10 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   }
 
   uint8_t* decoderScratch = cacheOnly ? buildscratch::claim(PNG_DECODER_SIZE) : nullptr;
-  if (!decoderScratch && !hasHeapForPngDecoder("decode")) return false;
+  if (!decoderScratch && !hasHeapForPngDecoder("decode")) {
+    if (config.error) *config.error = ImageRenderError::OutOfMemory;
+    return false;
+  }
 
   std::unique_ptr<PNG> heapPng;
   PNG* png = nullptr;
@@ -530,6 +543,7 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   }
   if (!png) {
     LOG_ERR("PNG", "Failed to allocate PNG decoder");
+    if (config.error) *config.error = ImageRenderError::OutOfMemory;
     return false;
   }
   const ScopedCleanup releaseDecoderScratch{[png, decoderScratch]() {
@@ -651,6 +665,7 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   auto lineBuffers = makeUniqueNoThrow<uint8_t[]>(lineBufferBytes);
   if (!lineBuffers) {
     LOG_ERR("PNG", "Failed to allocate PNG line buffers (%u bytes)", static_cast<unsigned>(lineBufferBytes));
+    if (config.error) *config.error = ImageRenderError::OutOfMemory;
     return false;
   }
   ctx.grayLineBuffer = lineBuffers.get();

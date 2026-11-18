@@ -17,6 +17,7 @@
 // and the JPEG/PNG callbacks pre-clamp destination ranges to screen bounds.
 struct DirectPixelWriter {
   uint8_t* fb;
+  GfxRenderer* nativeRenderer = nullptr;
   GfxRenderer::RenderMode mode;
   bool absolute = false;
   bool ditherBw = false;       // images on a B/W-only page: dither in BW, skip the gray planes
@@ -41,6 +42,7 @@ struct DirectPixelWriter {
 
   void init(GfxRenderer& renderer) {
     fb = renderer.getWriteTarget();
+    nativeRenderer = renderer.isGrayscale16Active() ? &renderer : nullptr;
     originY = renderer.getWriteOriginY();
     clipRows = renderer.getWriteRows();
     mode = renderer.getRenderMode();
@@ -152,6 +154,10 @@ struct DirectPixelWriter {
   // Must be called after beginRow() for the current row.
   // No bounds checking — caller guarantees coordinates are valid.
   inline void writePixel(int logicalX, uint8_t pixelValue, bool writeWhiteInBw = false) const {
+    if (nativeRenderer) {
+      nativeRenderer->drawImageGrayscale16Pixel(logicalX, rowLogicalY, pixelValue * 85);
+      return;
+    }
     auto pixel = GfxRenderer::mapTwoBitPixel(mode, pixelValue, absolute);
     if (ditherBw) {
       if (mode != GfxRenderer::BW) return;

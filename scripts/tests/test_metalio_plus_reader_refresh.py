@@ -13,6 +13,11 @@ struct GfxRenderer{
  bool continuous=false;
  bool combined=false;
  mutable int grayCalls=0;
+ bool nativeCycle=false,nativeOk=true;
+ mutable int nativeLegacyCalls=0,nativeModeCalls=0;
+ bool supportsNativeGrayscaleRefreshCycle()const{return nativeCycle;}
+ bool commitGrayscale16()const{++nativeLegacyCalls;return nativeOk;}
+ bool commitGrayscale16(HalDisplay::RefreshMode m)const{last=m;++nativeModeCalls;return nativeOk;}
  bool supportsContinuousImageReading()const{return continuous;}
  bool supportsTextOnlyCombinedBase()const{return combined;}
  bool supportsReaderTransitions()const{return false;}
@@ -66,6 +71,18 @@ int main(){
 #endif
  }
  assert(r.grayCalls==7 && due==3);
+ r.nativeCycle=true;due=1;
+ for(int page=0;page<7;++page){
+  assert(ReaderUtils::commitNativeWithRefreshCycle(r,due,false));
+  assert(r.last==(page%3==0?clean:HalDisplay::FAST_REFRESH));
+ }
+ assert(r.nativeModeCalls==7 && r.nativeLegacyCalls==0);
+ due=2;r.nativeOk=false;
+ assert(!ReaderUtils::commitNativeWithRefreshCycle(r,due,true)&&due==1&&r.last==clean);
+ r.nativeOk=true;
+ assert(ReaderUtils::commitNativeWithRefreshCycle(r,due,false)&&due==3&&r.last==clean);
+ r.nativeCycle=false;due=5;
+ assert(ReaderUtils::commitNativeWithRefreshCycle(r,due,false)&&due==1&&r.nativeLegacyCalls==1);
 
 }
 """)

@@ -7,6 +7,7 @@
 #include <HalDisplay.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <JpegToBmpConverter.h>
 #include <Memory.h>
 #include <PngToBmpConverter.h>
 
@@ -98,7 +99,10 @@ bool ImageViewerActivity::preparePreview() {
   bool prepared = false;
   {
     GfxRenderer::FrameBufferLoan loan(renderer);
-    prepared = PngToBmpConverter::pngFileToBmpFile(filePath.c_str(), IMAGE_PREVIEW_PATH, true);
+    prepared = PngToBmpConverter::pngFileToBmpFile(filePath.c_str(), IMAGE_PREVIEW_PATH, false,
+                                                   renderer.supportsNativeGrayscaleRefreshCycle()
+                                                       ? PngToBmpConverter::Output::Gray8
+                                                       : PngToBmpConverter::Output::Gray2);
   }
   if (!prepared) Storage.remove(IMAGE_PREVIEW_PATH);
   return prepared;
@@ -126,7 +130,13 @@ bool ImageViewerActivity::renderJpeg() {
   };
   renderer.clearScreen();
   if (renderer.getGrayscaleLevels() == 16 && renderer.beginGrayscale16()) {
-    if (drawImage(DecodeOutput::NativeGrayscale16) && renderer.commitGrayscale16()) return true;
+    if (drawImage(DecodeOutput::NativeGrayscale16)) {
+      if (renderer.commitGrayscale16()) return true;
+      if (renderer.supportsNativeGrayscaleRefreshCycle()) {
+        nativeRefreshFailed = true;
+        return false;
+      }
+    }
     renderer.cancelGrayscale16();
     renderer.clearScreen();
   }
@@ -156,9 +166,41 @@ bool ImageViewerActivity::renderJpeg() {
   return ready;
 }
 
+void ImageViewerActivity::renderImageFailure() {
+  renderer.cancelGrayscale16();
+  renderer.setRenderMode(GfxRenderer::BW);
+  renderer.clearScreen();
+  renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() / 2, tr(STR_FILE_OPEN_FAILED));
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+}
+
+bool ImageViewerActivity::renderNativeBitmap(const Bitmap& bitmap, const int x, const int y) {
+  imageReady = false;
+  nativeRefreshFailed = false;
+  const bool hasPrevious = siblingImages.size() > 1 && currentImageIndex > 0;
+  const bool hasNext = siblingImages.size() > 1 && currentImageIndex >= 0 &&
+                       currentImageIndex < static_cast<int>(siblingImages.size()) - 1;
+  const auto labels =
+      mappedInput.mapLabels(tr(STR_BACK), tr(STR_SET_SLEEP_COVER), hasPrevious ? "<" : "", hasNext ? ">" : "");
+  const ScopedCleanup cancelNative{[this] { renderer.cancelGrayscale16(); }};
+  if (!renderer.drawBitmapGrayscale16(bitmap, x, y, renderer.getScreenWidth(), renderer.getScreenHeight())) {
+    LOG_ERR("IMAGE", "Native bitmap decode failed");
+    renderImageFailure();
+    return false;
+  }
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  if (mappedInput.hasTouch()) GUI.drawActionButton(renderer, sleepCoverActionRect(renderer), tr(STR_SET_SLEEP_COVER));
+  imageReady = renderer.commitGrayscale16();
+  nativeRefreshFailed = !imageReady;
+  return imageReady;
+}
+
 void ImageViewerActivity::onEnter() {
   Activity::onEnter();
   imageReady = false;
+  nativeRefreshFailed = false;
 
   if (siblingImages.empty() && !filePath.empty()) {
     loadSiblingImages();
@@ -170,14 +212,7 @@ void ImageViewerActivity::onEnter() {
   GUI.fillPopupProgress(renderer, popupRect, 20);  // Initial 20% progress
   if (FsHelpers::hasJpgExtension(filePath)) {
     imageReady = renderJpeg();
-    if (!imageReady) {
-      renderer.setRenderMode(GfxRenderer::BW);
-      renderer.clearScreen();
-      renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, tr(STR_FILE_OPEN_FAILED));
-      const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
-      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-      renderer.displayBuffer(HalDisplay::HALF_REFRESH);
-    }
+    if (!imageReady && !nativeRefreshFailed) renderImageFailure();
     return;
   }
   const bool needsPreview = isPng();
@@ -230,10 +265,13 @@ void ImageViewerActivity::onEnter() {
       GUI.fillPopupProgress(renderer, popupRect, 50);
 
       renderer.clearScreen();
+      if (renderer.supportsNativeGrayscaleRefreshCycle() && renderer.getGrayscaleLevels() == 16 &&
+          renderer.beginGrayscale16()) {
+        imageReady = renderNativeBitmap(bitmap, x, y);
+        return;
+      }
       if (!renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, 0, 0)) {
-        renderer.clearScreen();
-        renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, tr(STR_FILE_OPEN_FAILED));
-        renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+        renderImageFailure();
         return;
       }
 
@@ -317,6 +355,22 @@ void ImageViewerActivity::onExit() {
 }
 
 bool ImageViewerActivity::prepareJpegSleepCover() {
+  if (renderer.supportsNativeGrayscaleRefreshCycle() && renderer.getGrayscaleLevels() == 16) {
+    bool converted = false;
+    {
+      HalFile input, output;
+      if (Storage.openFileForRead("IMAGE", filePath, input) &&
+          Storage.openFileForWrite("IMAGE", SLEEP_IMAGE_PART_PATH, output)) {
+        converted = JpegToBmpConverter::jpegFileToBmpStreamWithSize(
+            input, output, renderer.getScreenWidth(), renderer.getScreenHeight(),
+            SETTINGS.sleepScreenCoverMode == CrossPointSettings::SLEEP_SCREEN_COVER_MODE::CROP,
+            JpegToBmpConverter::Output::Gray8);
+        if (converted) converted = output.close();
+      }
+    }
+    if (!converted) Storage.remove(SLEEP_IMAGE_PART_PATH);
+    return converted;
+  }
   if (Storage.exists(JPEG_SLEEP_TMP_PXC) && !Storage.remove(JPEG_SLEEP_TMP_PXC)) {
     LOG_ERR("BMP", "Failed to remove previous sleep image pixels");
     return false;

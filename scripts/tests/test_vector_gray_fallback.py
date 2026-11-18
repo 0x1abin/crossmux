@@ -38,6 +38,8 @@ struct GfxRenderer {
 ''' + method(header, 'static constexpr TwoBitPixel mapTwoBitPixel(')
             + method(header, 'static constexpr TwoBitPixel mapTwoBitGlyphCoverage(') + r'''
  bool native=false;
+ bool aa=true;
+ bool nativeTextAntiAliasingEnabled() const { return aa; }
  std::array<uint8_t,8> packed{0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef};
  mutable std::array<int,32> pixels,grays;
  mutable std::array<int,5> rectangle{-1,-1,-1,-1,-1};
@@ -79,6 +81,14 @@ int main(){
   renderCharImpl(b,GfxRenderer::BW,font,65,0,0,ink,EpdFontFamily::REGULAR,bold);
   assert(a.pixels==b.pixels);
  }
+ GfxRenderer aaOff; aaOff.native=true; aaOff.aa=false;
+ renderCharImpl(aaOff,GfxRenderer::BW,font,65,0,0,true,EpdFontFamily::REGULAR);
+ for(int i=0;i<16;++i) assert(aaOff.grays[i]==-1);
+ font.data.is4Bit=false; font.glyph.width=4;
+ GfxRenderer two; two.native=true; two.packed={0x1b};
+ renderCharImpl(two,GfxRenderer::BW,font,65,0,0,true,EpdFontFamily::REGULAR);
+ assert(two.grays[0]==-1 && two.grays[1]==170 && two.grays[2]==85 && two.grays[3]==0);
+ font.data.is4Bit=true;
  // Original reported sample must be 1010 in BW, with no 2bpp reinterpretation.
  GfxRenderer sample;sample.packed={0xf0,0xf0};font.glyph.width=4;
  renderCharImpl(sample,GfxRenderer::BW,font,65,0,0,true,EpdFontFamily::REGULAR);
@@ -144,7 +154,8 @@ unsigned millis(){return 0;}
 struct HalDisplay {enum Mode {FULL_REFRESH};};
 struct GfxRenderer {
  enum Mode {BW}; bool start=true,commit=true,active=false,page=false,status=false;
- int bwFrames=0,nativeFrames=0; unsigned levels=16;
+ int bwFrames=0,nativeFrames=0; unsigned levels=16;bool cycle=false;
+ bool supportsNativeGrayscaleRefreshCycle()const{return cycle;}
  unsigned getGrayscaleLevels(){return levels;}
  bool beginGrayscale16(){if(start){active=true;page=status=false;}return start;}
  bool commitGrayscale16(){++nativeFrames;active=false;return commit;}
@@ -153,13 +164,20 @@ struct GfxRenderer {
  void clearScreen(){page=status=false;}
  void displayBuffer(HalDisplay::Mode){assert(!active&&page&&status);++bwFrames;}
 };
+// Adapt the native panel result for this reader-branch test. The production
+// refresh helper/cadence is exercised by test_metalio_plus_reader_refresh.py.
+namespace ReaderUtils {
+template<typename Renderer> bool commitNativeWithRefreshCycle(Renderer& renderer,int& counter,bool){
+ counter=1;return renderer.commitGrayscale16();
+}
+}
 struct {bool readingBackgroundEnabled=false;int fakeBold=0;} SETTINGS;
 struct {bool four=true;bool readerFaceIsFourBit(){return four;}} sdFontSystem;
 struct {bool switching=false;bool isSwitchPending(){return switching;}} activityManager;
 struct Probe {
- GfxRenderer renderer;bool needsTextGrayscale=true,pageHasImages=false;int pagesUntilFullRefresh=5;
+ GfxRenderer renderer;bool grayscaleEnabled=true,needsTextGrayscale=true,pageHasImages=false;int pagesUntilFullRefresh=5;
  bool eligible(){''' + eligibility + r''' return use16LevelText;}
- bool render(){const bool use16LevelText=eligible();const unsigned t0=0;
+ bool render(){const bool use16LevelText=eligible();const unsigned t0=0;const bool manualRefreshPending=false;
   const auto finish=[&]{return renderer.bwFrames>0 || (renderer.nativeFrames>0 && renderer.commit);};
   const auto renderPageWithGuideLines=[&]{renderer.page=true;};
   const auto renderStatusBar=[&]{renderer.status=true;};
@@ -174,16 +192,24 @@ int main(){
   assert(p.renderer.bwFrames==int(!start||!commit));
   assert(p.renderer.nativeFrames==int(start));
  }
- for(bool images:{false,true})for(bool background:{false,true})
+ for(bool start:{false,true})for(bool commit:{false,true}){
+  Probe p;p.renderer.cycle=true;p.renderer.start=start;p.renderer.commit=commit;
+  assert(p.render()==(!start||commit));
+  assert(p.renderer.bwFrames==int(!start)); // Failed native hardware is not immediately retried as B/W.
+  assert(!p.renderer.active&&p.pagesUntilFullRefresh==1);
+ }
+ for(bool cycle:{false,true})for(bool images:{false,true})for(bool background:{false,true})
  for(bool aa:{false,true})for(int bold:{0,1,2,3}){
   SETTINGS.readingBackgroundEnabled=background;SETTINGS.fakeBold=bold;
-  Probe p;p.pageHasImages=images;p.needsTextGrayscale=aa;
-  assert(p.eligible()==(!images&&!background&&aa&&bold==0));
+  Probe p;p.renderer.cycle=cycle;p.pageHasImages=images;p.needsTextGrayscale=aa;
+  assert(p.eligible()==(!background&&(aa||images)&&(!images||cycle)&&bold==0));
  }
  SETTINGS.readingBackgroundEnabled=false;SETTINGS.fakeBold=0;
  Probe p;p.needsTextGrayscale=false;assert(!p.eligible());
  p.needsTextGrayscale=true;p.renderer.levels=4;assert(!p.eligible());
  p.renderer.levels=16;sdFontSystem.four=false;assert(!p.eligible());
+ p.pageHasImages=true;p.renderer.cycle=true;assert(p.eligible());
+ p.pageHasImages=false;p.renderer.cycle=false;
  sdFontSystem.four=true;activityManager.switching=true;p.render();
  assert(!p.renderer.active&&p.renderer.bwFrames==0&&p.renderer.nativeFrames==0);
 }

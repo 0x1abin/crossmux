@@ -225,6 +225,10 @@ uint16_t HalDisplay::getDisplayHeight() const { return einkDisplay.getDisplayHei
 uint8_t HalDisplay::getGrayscaleLevels() const { return einkDisplay.getGrayscaleLevels(); }
 uint8_t* HalDisplay::beginGrayscale16() { return einkDisplay.beginGrayscale16(); }
 bool HalDisplay::commitGrayscale16() { return einkDisplay.commitGrayscale16(); }
+bool HalDisplay::commitGrayscale16(RefreshMode mode) { return einkDisplay.commitGrayscale16(convertRefreshMode(mode)); }
+bool HalDisplay::supportsNativeGrayscaleRefreshCycle() const {
+  return einkDisplay.supportsNativeGrayscaleRefreshCycle();
+}
 void HalDisplay::cancelGrayscale16() { einkDisplay.cancelGrayscale16(); }
 
 uint16_t HalDisplay::getDisplayWidthBytes() const { return einkDisplay.getDisplayWidthBytes(); }

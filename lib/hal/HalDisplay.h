@@ -158,6 +158,8 @@ class HalDisplay {
   uint8_t getGrayscaleLevels() const;
   uint8_t* beginGrayscale16();
   bool commitGrayscale16();
+  bool commitGrayscale16(RefreshMode mode);
+  bool supportsNativeGrayscaleRefreshCycle() const;
   void cancelGrayscale16();
   uint16_t getDisplayWidthBytes() const;
   uint32_t getBufferSize() const;

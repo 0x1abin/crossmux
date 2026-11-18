@@ -7,6 +7,8 @@
 #include "activities/Activity.h"
 #include "components/OptionPopup.h"
 
+class Bitmap;
+
 class ImageViewerActivity final : public Activity {
  public:
   ImageViewerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string filePath);
@@ -21,6 +23,8 @@ class ImageViewerActivity final : public Activity {
   bool isPng() const;
   bool preparePreview();
   bool renderJpeg();
+  void renderImageFailure();
+  bool renderNativeBitmap(const Bitmap& bitmap, int x, int y);
   bool prepareJpegSleepCover();
   void doSetSleepCover(const char* sourcePath, bool transparent);
   void showSleepCoverOptions();
@@ -29,5 +33,6 @@ class ImageViewerActivity final : public Activity {
   std::vector<std::string> siblingImages;
   int currentImageIndex = -1;
   bool imageReady = false;
+  bool nativeRefreshFailed = false;
   OptionPopup sleepCoverPopup;
 };

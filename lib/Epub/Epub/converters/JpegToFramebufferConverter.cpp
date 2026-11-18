@@ -218,7 +218,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
 
   const auto writeSample = [&](int outX, int outY, uint8_t gray) {
     if (ctx->config->output == DecodeOutput::NativeGrayscale16) {
-      renderer.drawGrayscale16Pixel(outX, outY, gray);
+      renderer.drawImageGrayscale16Pixel(outX, outY, gray);
       return;
     }
     const uint8_t level = useDithering ? applyBayerDither4Level(gray, outX, outY) : gray / 85;

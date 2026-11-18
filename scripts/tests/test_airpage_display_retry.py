@@ -161,9 +161,11 @@ struct GfxRenderer {
 };
 struct HalFile { size_t size() { return 42; } };
 struct StorageStub { bool openFileForRead(const char*,const std::string&,HalFile&) { return true; } } Storage;
+struct FsHelpers { static bool hasGifExtension(const std::string&) { return false; } };
 static bool remembered = false;
 bool imageFailedThisRender(const std::string&) { return remembered; }
 void rememberImageFailure(const std::string&) { remembered = true; }
+void releasePxcSlot() {}
 std::string getCachePath(const std::string&) { return "image.pxc"; }
 struct ImageBlock {
  enum class PixelCachePolicy { Stream };

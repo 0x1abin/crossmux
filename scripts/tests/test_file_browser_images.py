@@ -107,6 +107,7 @@ struct CrossPointSettings {
  bool saveToFile() { if (failedSaves > 0) { --failedSaves; return false; } return true; }
 } SETTINGS;
 struct GfxRenderer {
+ bool supportsNativeGrayscaleRefreshCycle() const { return false; }
  int width = 480, height = 800;
  int getScreenWidth() const { return width; }
  int getScreenHeight() const { return height; }
@@ -121,7 +122,8 @@ struct JpegToBmpConverter {
  }
 };
 struct PngToBmpConverter {
- static bool pngFileToBmpFile(const char* input, const char* out, bool) {
+ enum class Output { Gray2, Gray8 };
+ static bool pngFileToBmpFile(const char* input, const char* out, bool, Output = Output::Gray2) {
    ++pngConversions; Storage.data[out] = "PNG-BMP"; return !conversionFails && !Storage.writeFails && Storage.exists(input);
  }
  static bool pngFileToTransparentBmpFile(const char*, const char* out, bool) {

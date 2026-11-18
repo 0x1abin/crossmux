@@ -69,6 +69,17 @@ bool commitNativeGray(Display& display) {
   return false;
 }
 template <typename Display>
+bool nativeGrayRefreshCycle(const Display& display) {
+  if constexpr (requires { display.supportsNativeGrayscaleRefreshCycle(); })
+    return display.supportsNativeGrayscaleRefreshCycle();
+  return false;
+}
+template <typename Display>
+bool commitNativeGrayWithMode(Display& display, HalDisplay::RefreshMode mode) {
+  if constexpr (requires { display.commitGrayscale16(mode); }) return display.commitGrayscale16(mode);
+  return commitNativeGray(display);
+}
+template <typename Display>
 void cancelNativeGray(Display& display) {
   if constexpr (requires { display.cancelGrayscale16(); }) display.cancelGrayscale16();
 }
@@ -735,7 +746,8 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
       innerBase = cursorX + left;  // screenX = innerBase + glyphX
     }
 
-    if (is4Bit && renderer.isGrayscale16Active() && pixelState && syntheticBoldPixels == 0) {
+    if (is2Bit && renderer.isGrayscale16Active() && renderer.nativeTextAntiAliasingEnabled() && pixelState &&
+        syntheticBoldPixels == 0) {
       // Native coverage is used only for unmodified black glyphs.
       for (int glyphY = 0; glyphY < height; glyphY++) {
         const int outerCoord = outerBase + glyphY;
@@ -748,7 +760,9 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
             screenX = innerBase + glyphX;
             screenY = outerCoord;
           }
-          draw4BitGlyphPixel(renderer, screenX, screenY, get4BitCoverage(bitmap, glyphY * width + glyphX));
+          draw4BitGlyphPixel(renderer, screenX, screenY,
+                             is4Bit ? get4BitCoverage(bitmap, glyphY * width + glyphX)
+                                    : get2BitCoverage(bitmap, glyphY * width + glyphX) * 5);
         }
       }
     } else if (is2Bit || is4Bit) {
@@ -1747,6 +1761,23 @@ bool GfxRenderer::drawBitmapCropToFill(const Bitmap& bitmap, const int x, const 
   const int cropLeft = (scaledWidth - targetWidth) / 2;
   const int cropTop = (scaledHeight - targetHeight) / 2;
 
+  if (grayscale16Buffer) {
+    // One Gray8 source row and its packed input, retained by Bitmap; no scaled image allocation.
+    if (!bitmap.ensureDrawScratch(static_cast<size_t>(sourceWidth) + bitmap.getRowBytes())) return false;
+    auto* row = bitmap.drawScratch.get();
+    auto* packed = row + sourceWidth;
+    for (int sourceRow = 0; sourceRow < sourceHeight; ++sourceRow) {
+      if (bitmap.readNextRow(row, packed, nullptr, Bitmap::RowOutput::Gray8) != BmpReaderError::Ok) return false;
+      const int logicalRow = bitmap.isTopDown() ? sourceRow : sourceHeight - 1 - sourceRow;
+      const int top = std::max(0, logicalRow * scaledHeight / sourceHeight - cropTop);
+      const int bottom = std::min(targetHeight, (logicalRow + 1) * scaledHeight / sourceHeight - cropTop);
+      for (int dy = top; dy < bottom; ++dy)
+        for (int dx = 0; dx < targetWidth; ++dx)
+          drawGrayscale16Pixel(x + dx, y + dy, row[(dx + cropLeft) * sourceWidth / scaledWidth]);
+    }
+    return true;
+  }
+
   // Same bounded two-row working set as drawBitmap(); a scaled image buffer would exceed the RAM budget.
   const int outputRowSize = (sourceWidth + 3) / 4;
   const size_t scratchSize = static_cast<size_t>(outputRowSize) + bitmap.getRowBytes();
@@ -1811,8 +1842,19 @@ bool GfxRenderer::beginGrayscale16() {
 }
 
 bool GfxRenderer::commitGrayscale16() const {
+  if (supportsNativeGrayscaleRefreshCycle()) return commitGrayscale16(HalDisplay::FULL_REFRESH);
   if (!grayscale16Buffer) return false;
   const bool committed = commitNativeGray(display);
+  if (!committed) cancelNativeGray(display);
+  grayscale16Buffer = nullptr;
+  return committed;
+}
+
+bool GfxRenderer::supportsNativeGrayscaleRefreshCycle() const { return nativeGrayRefreshCycle(display); }
+
+bool GfxRenderer::commitGrayscale16(HalDisplay::RefreshMode mode) const {
+  if (!grayscale16Buffer) return false;
+  const bool committed = commitNativeGrayWithMode(display, applyPromotedRefresh(mode));
   if (!committed) cancelNativeGray(display);
   grayscale16Buffer = nullptr;
   return committed;
@@ -1823,8 +1865,19 @@ void GfxRenderer::cancelGrayscale16() const {
   grayscale16Buffer = nullptr;
 }
 
+void GfxRenderer::drawImageGrayscale16Pixel(int x, int y, uint8_t gray) const {
+  if (ditherImagesInBw) {
+    static constexpr uint8_t bayer[4] = {0, 2, 3, 1};
+    const unsigned threshold = bayer[((y & 1) << 1) | (x & 1)] * 64u + 32u;
+    gray = gray < threshold ? 0 : 255;
+  }
+  drawGrayscale16Pixel(x, y, gray);
+}
+
 void GfxRenderer::drawGrayscale16Pixel(const int x, const int y, const uint8_t gray) const {
-  if (!grayscale16Buffer || x < 0 || y < 0 || x >= getScreenWidth() || y >= getScreenHeight()) return;
+  if (!grayscale16Buffer || x < clipLeft_ || y < clipTop_ || x >= clipRight_ || y >= clipBottom_ || x < 0 || y < 0 ||
+      x >= getScreenWidth() || y >= getScreenHeight())
+    return;
   int px, py;
   rotateCoordinates(orientation, x, y, &px, &py, panelWidth, panelHeight);
   const size_t index = static_cast<size_t>(py) * (panelWidth / 2) + px / 2;
@@ -1878,6 +1931,8 @@ bool GfxRenderer::drawBitmapGrayscale16(const Bitmap& bitmap, const int x, const
 bool GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, const int maxWidth, const int maxHeight,
                              const float cropX, const float cropY, const bool preserveTransparency) const {
   if (fontCacheManager_ && fontCacheManager_->isScanning()) return false;
+  if (grayscale16Buffer && !preserveTransparency)
+    return drawBitmapGrayscale16(bitmap, x, y, maxWidth, maxHeight, cropX, cropY);
   // For 1-bit bitmaps, use optimized 1-bit rendering path (no crop support for 1-bit)
   if (bitmap.is1Bit() && cropX == 0.0f && cropY == 0.0f) {
     return drawBitmap1Bit(bitmap, x, y, maxWidth, maxHeight);
@@ -2161,6 +2216,16 @@ void GfxRenderer::clearScreen(const uint8_t color) const {
     return;
   }
   display.clearScreen(color);
+  if (grayscale16Buffer) {
+    if (color == 0 || color == 0xFF) {
+      memset(grayscale16Buffer, color, static_cast<size_t>(panelWidth / 2) * panelHeight);
+    } else {
+      for (size_t i = 0; i < static_cast<size_t>(panelWidth / 2) * panelHeight; ++i) {
+        const unsigned pair = (i % 4) * 2;
+        grayscale16Buffer[i] = ((color & (0x80 >> pair)) ? 0x0F : 0) | ((color & (0x40 >> pair)) ? 0xF0 : 0);
+      }
+    }
+  }
 }
 
 void GfxRenderer::beginStripTarget(uint8_t* scratch, int stripY0, int stripRows) const {
@@ -2209,6 +2274,10 @@ HalDisplay::RefreshMode GfxRenderer::applyPromotedRefresh(HalDisplay::RefreshMod
 }
 
 void GfxRenderer::displayBuffer(HalDisplay::RefreshMode refreshMode, DisplayRefreshContext context) const {
+  if (grayscale16Buffer && supportsNativeGrayscaleRefreshCycle()) {
+    if (!commitGrayscale16(refreshMode)) LOG_ERR("GFX", "Native UI frame commit failed");
+    return;
+  }
   auto elapsed = millis() - start_ms;
   LOG_DBG("GFX", "Time = %lu ms from clearScreen to displayBuffer", elapsed);
   HalDisplay::RefreshMode effectiveRefreshMode = refreshMode;
@@ -2225,6 +2294,10 @@ void GfxRenderer::displayBuffer(HalDisplay::RefreshMode refreshMode, DisplayRefr
 }
 
 void GfxRenderer::displayBufferAsync(const HalDisplay::RefreshMode refreshMode, DisplayRefreshContext context) const {
+  if (grayscale16Buffer && supportsNativeGrayscaleRefreshCycle()) {
+    if (!commitGrayscale16(refreshMode)) LOG_ERR("GFX", "Native asynchronous UI frame commit failed");
+    return;
+  }
   HalDisplay::RefreshMode effectiveRefreshMode = refreshMode;
   if (nextRefreshOverridePending) {
     effectiveRefreshMode = nextRefreshOverride;
