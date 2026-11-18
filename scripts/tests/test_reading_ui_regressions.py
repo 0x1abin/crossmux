@@ -445,7 +445,7 @@ struct CrossPointSettings {
 };
 struct { int inxTabPosition=0, clockFormat=0; CrossPointSettings::HIDE_BATTERY_PERCENTAGE hideBatteryPercentage{}; } SETTINGS;
 struct UITheme {
-  struct Metrics { int batteryWidth=32,batteryHeight=20; };
+  struct Metrics { int batteryWidth=34,batteryHeight=24; };
   static UITheme& getInstance() { static UITheme theme; return theme; }
   const Metrics& getMetrics() { static Metrics metrics; return metrics; }
 };
@@ -463,7 +463,7 @@ struct InxTheme {
   void drawBatteryRight(const GfxRenderer& r,Rect rect,bool,int font) const {
     assert(font==SMALL_FONT_ID && rect.y>=r.clip.y);
     assert(rect.y+34<=r.clip.y+r.clip.height);
-    assert(rect.y+8+rect.height<=r.clip.y+r.clip.height);
+    assert(rect.y+6+rect.height<=r.clip.y+r.clip.height);
     assert(rect.x>=r.clip.x && rect.x+rect.width<=r.clip.x+r.clip.width);
   }
 };
@@ -1788,7 +1788,7 @@ bool formatCurrentTime(char* out,size_t size,bool hour12) {
 }
 }
 struct Metrics {
-  int batteryWidth=UiHighDpiProfile::enabled?32:16,batteryHeight=UiHighDpiProfile::enabled?20:12;
+  int batteryWidth=UiHighDpiProfile::enabled?34:16,batteryHeight=UiHighDpiProfile::enabled?24:12;
   int headerSidePadding=18,headerBatterySide=0,headerHeight=UiHighDpiProfile::enabled?112:84;
   int batteryBarHeight=HeaderStatusMetrics::stripHeight;
   bool headerClockCentered=false,headerShowsClock=true;
@@ -1847,6 +1847,10 @@ template <size_t N> struct GfxRendererFrame {
   GfxRendererFrame(const GfxRenderer& r,int,int,int):target(r),frame(target,device,input,interactions) {}
 };
 }
+bool drawHeaderBattery(freeink::ui::DrawTarget& target,freeink::ui::Rect rect,
+                       const freeink::ui::BatteryIndicatorProps&,void*) {
+  target.stroke(rect,freeink::ui::Paint::solid(freeink::ui::Color::Black),1);return true;
+}
 void applyUiTextAlignment(freeink::ui::GfxRendererTarget&,bool) {}
 struct BaseTheme {
   static int headerStatusInset(bool=false);
@@ -1877,7 +1881,7 @@ int main() {
       assert(op.rect.y>=slot.y+offset && op.rect.bottom()<=slot.y+slot.height);
     }
     assert(battery && date && bool(time)==(clock&&valid) && bool(label)==!hide);
-    assert(battery->rect.x==width-inset-(22+std::max(0,BoardConfig::ACTIVE.cornerRadius-inset))-metrics.batteryWidth-2);
+    assert(battery->rect.x==width-inset-(22+std::max(0,BoardConfig::ACTIVE.cornerRadius-inset))-metrics.batteryWidth-(UiHighDpiProfile::enabled?0:2));
     if (time) {
       assert(std::abs((time->rect.y*2+time->rect.height)-(battery->rect.y*2+battery->rect.height))<=1);
       assert(time->rect.right()+8<=date->rect.x);
