@@ -78,7 +78,6 @@ class OptionPopup {
   bool handleInput(MappedInputManager& input, const std::function<void()>& requestUpdate) {
     if (!active) return false;
 
-    const int total = static_cast<int>(ownedStrings.size());
     const freeink::ui::InputSnapshot snap = touchSnapshotFrom(input);
     if (ignoreInitialTouchContact) {
       if (snap.touchPressed || snap.touchHeld || snap.touchReleased) {
@@ -98,8 +97,7 @@ class OptionPopup {
         release.touchX = release.touchY = -1;
         interactions.routePublished(release);
         const int step = std::max(1, visibleOptionRows.load());
-        selectedIndex =
-            std::clamp(selectedIndex + (swipe == MappedInputManager::SwipeDir::Up ? step : -step), 0, total - 1);
+        pendingScroll.fetch_add(swipe == MappedInputManager::SwipeDir::Up ? step : -step);
         requestUpdate();
         return true;
       }
@@ -113,7 +111,7 @@ class OptionPopup {
           // Tap released on an option: select it, fire, dismiss.
           selectedIndex = event.value;
           active = false;
-          if (onSelectCallback) onSelectCallback(selectedIndex);
+          if (onSelectCallback) onSelectCallback(selectedIndex.load());
           haptic_feedback::touchAction();
           requestUpdate();
           return true;
@@ -143,7 +141,7 @@ class OptionPopup {
           }
         }
       }
-      return true;
+      if (!snap.touchReleased || snap.touchX >= 0) return true;
     }
 
     const auto confirm = MappedInputManager::Button::Confirm;
@@ -197,17 +195,21 @@ class OptionPopup {
     if (count <= 0) return true;
     if (previous) {
       selectedIndex = (selectedIndex - 1 + count) % count;
+      pendingScroll = 0;
+      followSelection = true;
       requestUpdate();
       return true;
     }
     if (next) {
       selectedIndex = (selectedIndex + 1) % count;
+      pendingScroll = 0;
+      followSelection = true;
       requestUpdate();
       return true;
     }
     if (confirm) {
       active = false;
-      if (onSelectCallback) onSelectCallback(selectedIndex);
+      if (onSelectCallback) onSelectCallback(selectedIndex.load());
       requestUpdate();
       return true;
     }
@@ -326,16 +328,31 @@ class OptionPopup {
 
     // Fixed fraction of the screen, clamped by the theme's side margins; the
     // old max-text-width sizing is gone, long labels wrap inside the buttons.
-    const fui::Rect screen = device.screen();
-    const auto safe = device.safeRect();
+    const bool preserveInxCenter = !upstreamStyle && UITheme::getInstance().hasMainTabs();
+    const auto activeSafe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+    const fui::Rect screen = preserveInxCenter
+                                 ? device.screen()
+                                 : fui::Rect{fui::clampI16(activeSafe.x), fui::clampI16(activeSafe.y),
+                                             fui::clampI16(activeSafe.width), fui::clampI16(activeSafe.height)};
+    const fui::Rect safe = preserveInxCenter ? device.safeRect() : screen;
     const int16_t width =
         fui::clampI16(std::min({screen.width * 3 / 4, screen.width - metrics.optionPopupDialogSideMargin * 2,
                                 static_cast<int>(safe.width)}),
                       0, safe.width);
-    const int textHeight = fui::optionDialogHeight(target, props, width);
-    const int availableHeight = std::max(0, static_cast<int>(safe.height) - textHeight - props.gap);
-    const int count = std::min(
-        {totalOptions, MAX_OPTIONS, std::max(1, (availableHeight + props.gap) / (props.buttonHeight + props.gap))});
+    int count;
+    if (preserveInxCenter) {
+      const int textHeight = fui::optionDialogHeight(target, props, width);
+      const int availableHeight = std::max(0, static_cast<int>(safe.height) - textHeight - props.gap);
+      count = std::min(
+          {totalOptions, MAX_OPTIONS, std::max(1, (availableHeight + props.gap) / (props.buttonHeight + props.gap))});
+    } else {
+      options[0].label = ownedStrings[0].c_str();
+      props.optionCount = props.visibleOptions = 1;
+      const int singleOptionHeight = fui::optionDialogHeight(target, props, width);
+      const int maxHeight = screen.height - metrics.optionPopupDialogSideMargin * 2;
+      count = std::clamp(1 + (maxHeight - singleOptionHeight) / (props.buttonHeight + props.gap), 1,
+                         std::min(totalOptions, MAX_OPTIONS));
+    }
     const int first = windowStart(count);
     visibleOptionRows = count;
     for (int i = 0; i < count; ++i) {
@@ -344,11 +361,8 @@ class OptionPopup {
       options[i].value = static_cast<int16_t>(first + i);
       options[i].state = first + i == selectedIndex ? fui::StateFocused : fui::StateNormal;
     }
-    props.optionCount = static_cast<uint8_t>(count);
+    props.optionCount = props.visibleOptions = static_cast<uint8_t>(count);
     const int16_t height = fui::clampI16(fui::optionDialogHeight(target, props, width), 0, safe.height);
-    // INX keeps its established safe-area center, including message dialogs.
-    // Shared upstream pages center on the screen and move only to clear the bezel.
-    const bool preserveInxCenter = !upstreamStyle && UITheme::getInstance().hasMainTabs();
     fui::Rect dialogRect = fui::centeredRect(preserveInxCenter ? safe : screen, fui::Size{width, height});
     dialogRect.x = fui::clampI16(std::clamp<int>(dialogRect.x, safe.x, safe.x + safe.width - width));
     dialogRect.y = fui::clampI16(std::clamp<int>(dialogRect.y, safe.y, safe.y + safe.height - height));
@@ -388,6 +402,9 @@ class OptionPopup {
     }
     selectedIndex = std::clamp(currentIndex, 0, count - 1);
     firstOption = -1;
+    pendingScroll = 0;
+    followSelection = true;
+    visibleOptionRows = 1;
     onSelectCallback = std::move(onSelect);
     // Deferred, not armed: handleInput() decides from the first input pass
     // whether Confirm was inherited from the opening gesture or freshly
@@ -406,13 +423,18 @@ class OptionPopup {
   static constexpr freeink::ui::ActionId ACTION_CHROME = 2;
 
   int windowStart(const int rows) const {
-    const int maximum = std::max(0, static_cast<int>(ownedStrings.size()) - rows);
+    const int total = static_cast<int>(ownedStrings.size());
+    const int maximum = std::max(0, total - rows);
     int first = firstOption.load();
-    if (first < 0 || selectedIndex < first || selectedIndex >= first + rows) {
-      first = std::clamp(selectedIndex - rows / 2, 0, maximum);
-    } else {
-      first = std::clamp(first, 0, maximum);
+    const bool follow = followSelection.exchange(false);
+    if (first < 0 || follow) {
+      if (!upstreamStyle && UITheme::getInstance().hasMainTabs())
+        first = std::clamp(selectedIndex - rows / 2, 0, maximum);
+      else
+        first = freeink::ui::listTopIndexFor(selectedIndex, std::max(0, first), rows, total);
     }
+    const int scroll = std::clamp(pendingScroll.exchange(0), -total, total);
+    first = std::clamp(first + scroll, 0, maximum);
     firstOption = first;
     return first;
   }
@@ -422,7 +444,10 @@ class OptionPopup {
   std::string headline;
   std::string message;
   std::vector<std::string> ownedStrings;
-  int selectedIndex = 0;
+  std::atomic<int> selectedIndex{0};
+  // Only rendering moves the viewport; input queues scroll/follow requests.
+  mutable std::atomic<int> pendingScroll{0};
+  mutable std::atomic<bool> followSelection{true};
   std::function<void(int)> onSelectCallback;
   bool ignoreInitialConfirmRelease = false;
   // Set by finishShow() and cleared by the first input pass that reaches the

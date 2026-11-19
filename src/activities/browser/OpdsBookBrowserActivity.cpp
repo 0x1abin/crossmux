@@ -14,6 +14,7 @@
 #include <OpdsFeedParser.h>
 #include <OpdsPublicationDoc.h>
 #include <OpdsSearchTemplate.h>
+#include <ResumableFetch.h>
 #include <StreamingJsonParser.h>
 #include <Util.h>
 #include <WolfsslCrypto.h>
@@ -40,6 +41,7 @@
 namespace fui = freeink::ui;
 
 namespace {
+constexpr unsigned long GO_HOME_MS = 1000;
 // ACTION_PAGE values: which pagination link a tab follows.
 constexpr int16_t PAGE_FIRST = 0;
 constexpr int16_t PAGE_PREV = 1;
@@ -551,7 +553,7 @@ void OpdsBookBrowserActivity::navigateToEntry(const OpdsEntry& entry) {
 }
 
 void OpdsBookBrowserActivity::navigateBack() {
-  if (navigationHistory.empty()) {
+  if (navigationHistory.empty() || mappedInput.getHeldTime() >= GO_HOME_MS) {
     onGoHome();
     return;
   }
@@ -652,9 +654,6 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
     releaseEntries();
   }
 
-  const freeink::opds::HttpAuth dlAuth = opdsTransport.authFor(downloadUrl, opdsClient.downloadAuth());
-  std::vector<HttpDownloader::Header> headers = dlAuth.headers;
-  if (!dlAuth.bearer.empty()) headers.push_back({"Authorization", "Bearer " + dlAuth.bearer});
   // downloadFile() (CatalogActivity) releases font caches, checks the TLS heap
   // floor, and pumps cancel input during the transfer.
   const std::string staged = downloadStagePath();
@@ -667,7 +666,14 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
     Storage.remove(staged.c_str());
     Storage.remove(part.c_str());
   }};
-  const auto result = downloadFile(downloadUrl, staged, dlAuth.username, dlAuth.password, headers);
+  auto result = HttpDownloader::HTTP_ERROR;
+  for (unsigned attempt = 0; attempt < 2; ++attempt) {
+    const auto auth = opdsTransport.authFor(downloadUrl, opdsClient.downloadAuth());
+    std::vector<HttpDownloader::Header> headers = auth.headers;
+    if (!auth.bearer.empty()) headers.push_back({"Authorization", "Bearer " + auth.bearer});
+    result = downloadFile(downloadUrl, staged, auth.username, auth.password, headers);
+    if (result != HttpDownloader::UNAUTHORIZED || attempt != 0 || !refreshDownloadAuth(downloadUrl)) break;
+  }
 
   if (result == HttpDownloader::OK && !verifyAndRegisterEpub(staged, filename)) return;
   finishDownload(result);
@@ -699,17 +705,19 @@ void OpdsBookBrowserActivity::downloadLcpBook(const OpdsEntry& book) {
   // The license fetch uses the catalog's own credentials; the fulfillment
   // service only ever sees the license document itself.
   std::string licenseText;
-  {
-    int status = 0;
+  int status = 0;
+  bool memoryRefused = false;
+  bool ok = false;
+  for (unsigned attempt = 0; attempt < 2; ++attempt) {
+    licenseText.clear();
     HttpDownloader::FetchOptions options;
-    const freeink::opds::HttpAuth auth = opdsTransport.authFor(licenseUrl, opdsClient.downloadAuth());
+    const auto auth = opdsTransport.authFor(licenseUrl, opdsClient.downloadAuth());
     options.username = auth.username;
     options.password = auth.password;
     options.bearer = auth.bearer;
     options.headers = auth.headers;
     options.statusOut = &status;
-    bool memoryRefused = false;
-    const bool ok = HttpDownloader::fetchUrl(
+    ok = HttpDownloader::fetchUrl(
         licenseUrl,
         [&licenseText, &memoryRefused](const uint8_t* data, size_t len) {
           if (len > MAX_LICENSE_BYTES - licenseText.size() ||
@@ -721,11 +729,12 @@ void OpdsBookBrowserActivity::downloadLcpBook(const OpdsEntry& book) {
           return true;
         },
         options);
-    if (!ok || licenseText.empty()) {
-      LOG_ERR("OPDS", "LCP license fetch failed (status %d)", status);
-      fail(memoryRefused ? StrId::STR_MEMORY_ERROR : StrId::STR_FETCH_FEED_FAILED);
-      return;
-    }
+    if (ok || memoryRefused || attempt != 0 || !refreshDownloadAuth(licenseUrl)) break;
+  }
+  if (!ok || licenseText.empty()) {
+    LOG_ERR("OPDS", "LCP license fetch failed (status %d)", status);
+    fail(memoryRefused ? StrId::STR_MEMORY_ERROR : StrId::STR_FETCH_FEED_FAILED);
+    return;
   }
 
   freeink::content::LcpLicense license;
@@ -1055,10 +1064,14 @@ void OpdsBookBrowserActivity::loadDetailCover(const std::string& docUrl, const s
     LOG_INF("OPDS", "Skipping cover: low heap");
     return;
   }
-  const freeink::opds::HttpAuth auth = opdsTransport.authFor(url, opdsClient.downloadAuth());
-  std::vector<HttpDownloader::Header> headers = auth.headers;
-  if (!auth.bearer.empty()) headers.push_back({"Authorization", "Bearer " + auth.bearer});
-  const auto result = HttpDownloader::downloadToFile(url, tmp, nullptr, nullptr, auth.username, auth.password, headers);
+  auto result = HttpDownloader::HTTP_ERROR;
+  for (unsigned attempt = 0; attempt < 2; ++attempt) {
+    const auto auth = opdsTransport.authFor(url, opdsClient.downloadAuth());
+    std::vector<HttpDownloader::Header> headers = auth.headers;
+    if (!auth.bearer.empty()) headers.push_back({"Authorization", "Bearer " + auth.bearer});
+    result = HttpDownloader::downloadToFile(url, tmp, nullptr, nullptr, auth.username, auth.password, headers);
+    if (result != HttpDownloader::UNAUTHORIZED || attempt != 0 || !refreshDownloadAuth(url)) break;
+  }
   if (result != HttpDownloader::OK) {
     LOG_ERR("OPDS", "Cover download failed: %d", static_cast<int>(result));
     if (Storage.exists(tmp.c_str())) Storage.remove(tmp.c_str());
@@ -1116,6 +1129,15 @@ void OpdsBookBrowserActivity::onClientStatus(void* ctx, const freeink::opds::Cli
   auto* self = static_cast<OpdsBookBrowserActivity*>(ctx);
   self->statusMessage = phase == freeink::opds::ClientPhase::SigningIn ? tr(STR_OPDS_SIGNING_IN) : tr(STR_LOADING);
   self->requestUpdate(true);
+}
+
+bool OpdsBookBrowserActivity::refreshDownloadAuth(const std::string& url) {
+  if (HttpDownloader::lastStatus() != 401 || HttpDownloader::lastAnswerRedirected() ||
+      freeink::fetchOrigin(url) != freeink::fetchOrigin(server.url))
+    return false;
+  const bool renewed = opdsClient.authenticateDownload(url);
+  if (opdsClient.tokensDirty()) persistTokens();
+  return renewed;
 }
 
 bool OpdsBookBrowserActivity::persistTokens() {

@@ -237,6 +237,7 @@ int main() {
         run_cpp(r'''
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
@@ -268,8 +269,12 @@ struct Glyph { int top=0,height=0; };
 struct Font { const Glyph* getGlyph(char,int) const {return nullptr;} };
 namespace BoardConfig {
 struct { int statusBarOffsetY=0,bottomCornerRadius=0,cornerRadius=0; } ACTIVE;
+constexpr bool isEegoA4() {return false;}
 }
 struct GfxRenderer {
+ enum Orientation { Portrait, LandscapeClockwise, PortraitInverted, LandscapeCounterClockwise };
+ Orientation orientation=Portrait;
+ Orientation getOrientation() const {return orientation;}
  const std::map<int,Font>& getFontMap() const {static const std::map<int,Font> fonts;return fonts;}
  int getFontAscenderSize(int) const {return 34;}
  int width=684,height=1216,top=5,right=5,bottom=8,left=5;
@@ -340,17 +345,19 @@ void drawBluetoothStatusIcon(const GfxRenderer& r,int x,int y) {drawBookmarkStat
 int main() {
  for (auto size : {Rect{0,0,684,1216},Rect{0,0,600,1000}})
  for (bool inx : {false,true})
- for (int orientation=0;orientation<4;++orientation) for (bool percent : {false,true})
+ for (auto orientation : {GfxRenderer::Portrait,GfxRenderer::LandscapeClockwise,
+                          GfxRenderer::PortraitInverted,GfxRenderer::LandscapeCounterClockwise})
+ for (bool percent : {false,true})
  for (int clock : {CrossPointSettings::STATUS_BAR_CLOCK_HIDE,CrossPointSettings::STATUS_BAR_CLOCK_LEFT,
                    CrossPointSettings::STATUS_BAR_CLOCK_RIGHT}) for(bool markers : {false,true})
  for(int footerLineHeight : {26,34,42}) {
-   GfxRenderer r; UITheme::inx=inx;
+   GfxRenderer r; UITheme::inx=inx;r.orientation=orientation;
    r.footerLineHeight=footerLineHeight;
    r.width=size.width;r.height=size.height;
    if (orientation%2) {r.width=size.height;r.height=size.width;}
-   if (orientation==1) {r.top=5;r.right=8;r.bottom=5;r.left=5;}
-   if (orientation==2) {r.top=8;r.right=5;r.bottom=5;r.left=5;}
-   if (orientation==3) {r.top=5;r.right=5;r.bottom=5;r.left=8;}
+   if (orientation==GfxRenderer::LandscapeClockwise) {r.top=5;r.right=8;r.bottom=5;r.left=5;}
+   if (orientation==GfxRenderer::PortraitInverted) {r.top=8;r.right=5;r.bottom=5;r.left=5;}
+   if (orientation==GfxRenderer::LandscapeCounterClockwise) {r.top=5;r.right=5;r.bottom=5;r.left=8;}
    SETTINGS.spec.showBatteryPercent=percent;SETTINGS.spec.clockMode=clock;bleinput::connected=markers;
    BaseTheme::drawStatusBar(r,100,65535,65535,std::string(200,'L'),0,0,false,markers,true);
    assert(!r.texts.empty());
@@ -391,6 +398,8 @@ struct GfxRenderer {
  void getOrientedViewableTRBL(int* t,int* r,int* b,int* l) const {*t=top;*r=right;*b=bottom;*l=left;}
 };
 struct UITheme {
+ inline static bool inx=false;
+ bool hasMainTabs() const {return inx;}
  static UITheme& getInstance() {static UITheme theme;return theme;}
  Metrics getMetrics() const {return {};}
  static int getStatusBarHeight();
@@ -403,11 +412,12 @@ int contentBottom(const GfxRenderer& renderer,bool automaticPageTurnActive) {
  return renderer.height-orientedMarginBottom;
 }
 int main() {
+ for (bool inx : {false,true})
  for (int orientation=0;orientation<4;++orientation)
  for (int textHeight : {26,34,42,48,56}) for (int numericHeight : {34,50})
  for (bool text : {false,true}) for (bool progress : {false,true})
  for (bool automatic : {false,true}) for (uint8_t margin : {0,25,100}) {
-   GfxRenderer r;
+   GfxRenderer r; UITheme::inx=inx;
    if(orientation%2) {r.width=1216;r.height=684;}
    if(orientation==1) {r.right=8;r.bottom=5;}
    if(orientation==2) {r.top=8;r.bottom=5;}
@@ -419,6 +429,10 @@ int main() {
    const int oldReserve=(text||automatic?lane:0)+bar;
    const int oldBottom=r.height-r.bottom-std::max<int>(margin,oldReserve);
    const int bottom=contentBottom(r,automatic);
+   if(!inx) {
+     assert(bottom==r.height-r.bottom-margin-oldReserve);
+     continue;
+   }
    assert(bottom>=oldBottom);
    assert(bottom<=r.height-r.bottom-margin);
    if(!UiHighDpiProfile::enabled || !(text||automatic) || margin>=oldReserve)

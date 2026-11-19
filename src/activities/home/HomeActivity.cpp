@@ -19,7 +19,6 @@
 #include "CrossPointState.h"
 #include "HapticFeedback.h"
 #include "MappedInputManager.h"
-#include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -35,7 +34,7 @@ struct HomeMenuEntry {
 constexpr HomeMenuEntry kDefaultMenuOrder[] = {
     {HomeMenuItem::FILE_BROWSER, StrId::STR_BROWSE_FILES, Folder},
     {HomeMenuItem::LIBRARY, StrId::STR_LIBRARY, Library},
-    {HomeMenuItem::OPDS_BROWSER, StrId::STR_OPDS_BROWSER, Blocks},
+    {HomeMenuItem::PLUGINS, StrId::STR_PLUGINS, Plugins},
     {HomeMenuItem::FILE_TRANSFER, StrId::STR_FILE_TRANSFER, Transfer},
     {HomeMenuItem::SETTINGS_MENU, StrId::STR_SETTINGS_TITLE, Settings},
     {HomeMenuItem::APPS, StrId::STR_APPS_TITLE, Apps},
@@ -43,29 +42,30 @@ constexpr HomeMenuEntry kDefaultMenuOrder[] = {
 constexpr HomeMenuEntry kCarouselMenuOrder[] = {
     {HomeMenuItem::FILE_BROWSER, StrId::STR_BROWSE_FILES, Folder},
     {HomeMenuItem::RECENTS, StrId::STR_MENU_RECENT_BOOKS, Recent},
-    {HomeMenuItem::OPDS_BROWSER, StrId::STR_OPDS_BROWSER, Library},
+    {HomeMenuItem::PLUGINS, StrId::STR_PLUGINS, Plugins},
     {HomeMenuItem::APPS, StrId::STR_APPS_TITLE, Apps},
     {HomeMenuItem::FILE_TRANSFER, StrId::STR_FILE_TRANSFER, Transfer},
     {HomeMenuItem::SETTINGS_MENU, StrId::STR_SETTINGS_TITLE, Settings},
 };
 constexpr int kHomeMenuItemCount = 6;
 
-constexpr const HomeMenuEntry* menuEntryAtIndex(int index, bool hasOpds, bool carousel) {
+constexpr const HomeMenuEntry* menuEntryAtIndex(int index, bool hasPlugins, bool carousel) {
   if (index < 0) return nullptr;
-  if (!hasOpds && index >= 2) ++index;
+  if (!hasPlugins && index >= 2) ++index;
   if (index >= kHomeMenuItemCount) return nullptr;
   return &(carousel ? kCarouselMenuOrder : kDefaultMenuOrder)[index];
 }
 
-constexpr HomeMenuItem indexToMenuItem(int index, bool hasOpds, bool carousel) {
-  const HomeMenuEntry* entry = menuEntryAtIndex(index, hasOpds, carousel);
+constexpr HomeMenuItem indexToMenuItem(int index, bool hasPlugins, bool carousel) {
+  const HomeMenuEntry* entry = menuEntryAtIndex(index, hasPlugins, carousel);
   return entry == nullptr ? HomeMenuItem::NONE : entry->item;
 }
 
-constexpr int menuItemToIndex(HomeMenuItem item, bool hasOpds, bool carousel) {
-  const int count = hasOpds ? kHomeMenuItemCount : kHomeMenuItemCount - 1;
+constexpr int menuItemToIndex(HomeMenuItem item, bool hasPlugins, bool carousel) {
+  if (item == HomeMenuItem::OPDS_BROWSER) item = HomeMenuItem::FILE_TRANSFER;
+  const int count = hasPlugins ? kHomeMenuItemCount : kHomeMenuItemCount - 1;
   for (int i = 0; i < count; ++i) {
-    if (indexToMenuItem(i, hasOpds, carousel) == item) return i;
+    if (indexToMenuItem(i, hasPlugins, carousel) == item) return i;
   }
   return 0;
 }
@@ -85,7 +85,7 @@ int HomeActivity::getMenuItemCount() const {
   if (!recentBooks.empty()) {
     count += recentBooks.size();
   }
-  if (hasLibrarySlot()) {
+  if (hasPlugins) {
     count++;
   }
   return count;
@@ -324,7 +324,6 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
 void HomeActivity::onEnter() {
   Activity::onEnter();
 
-  hasOpdsServers = OPDS_STORE.hasServers();
   // Plugin System is the global opt-in. Once enabled, expose the Plugins entry
   // even when no SD plugins are installed yet so Plugin Hub can be installed
   // from inside the Plugins screen (or users can sideload plugins manually).
@@ -341,14 +340,15 @@ void HomeActivity::onEnter() {
   if (coverGridUi) {
     fillCoverGridFromLibrary();
     resolveGridCoverPaths();
-    coverGridUi->begin(recentBooks, hasLibrarySlot(), hasContinueReading);
+    coverGridUi->begin(recentBooks, hasPlugins ? CoverGridHomeUi::SlotTab::PLUGINS : CoverGridHomeUi::SlotTab::NONE,
+                       hasContinueReading);
   }
 
   const auto base = static_cast<int>(recentBooks.size());
   const bool isCarousel =
       static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
   selectorIndex =
-      initialMenuItem == HomeMenuItem::NONE ? 0 : base + menuItemToIndex(initialMenuItem, hasLibrarySlot(), isCarousel);
+      initialMenuItem == HomeMenuItem::NONE ? 0 : base + menuItemToIndex(initialMenuItem, hasPlugins, isCarousel);
   lastCarouselBookIndex = 0;
 
   // Trigger first update
@@ -390,6 +390,7 @@ bool HomeActivity::storeCoverBuffer() {
     coverBuffer = std::move(replacement);
     coverBufferSize = needed;
   }
+  coverBufferInverted = renderer.isInverted();
 
   if (!renderer.copyRegionToBuffer(coverRectX, coverRectY, coverRectW, coverRectH, coverBuffer.get(),
                                    coverBufferSize)) {
@@ -399,7 +400,7 @@ bool HomeActivity::storeCoverBuffer() {
 }
 
 bool HomeActivity::restoreCoverBuffer() {
-  if (!coverBuffer || coverRectW <= 0 || coverRectH <= 0) return false;
+  if (!coverBuffer || coverRectW <= 0 || coverRectH <= 0 || coverBufferInverted != renderer.isInverted()) return false;
   return renderer.copyBufferToRegion(coverRectX, coverRectY, coverRectW, coverRectH, coverBuffer.get(),
                                      coverBufferSize);
 }
@@ -425,7 +426,7 @@ void HomeActivity::loop() {
       return;
     }
     const int menuIndex = selectorIndex - static_cast<int>(recentBooks.size());
-    switch (indexToMenuItem(menuIndex, hasLibrarySlot(), isCarousel)) {
+    switch (indexToMenuItem(menuIndex, hasPlugins, isCarousel)) {
       case HomeMenuItem::FILE_BROWSER:
         onFileBrowserOpen();
         break;
@@ -435,8 +436,8 @@ void HomeActivity::loop() {
       case HomeMenuItem::LIBRARY:
         onLibraryOpen();
         break;
-      case HomeMenuItem::OPDS_BROWSER:  // the library slot
-        hasPlugins ? onPluginsOpen() : onOpdsBrowserOpen();
+      case HomeMenuItem::PLUGINS:
+        onPluginsOpen();
         break;
       case HomeMenuItem::FILE_TRANSFER:
         onFileTransferOpen();
@@ -710,17 +711,16 @@ void HomeActivity::render(RenderLock&&) {
   if (SETTINGS.standbyShortcutEnabled) backLabel = tr(STR_STANDBY_TITLE);
 
   const Rect content = isCarousel ? Rect{0, 0, pageWidth, pageHeight} : UITheme::getContentArea(renderer);
-  const int homeMenuItemCount = hasLibrarySlot() ? kHomeMenuItemCount : kHomeMenuItemCount - 1;
+  const int homeMenuItemCount = hasPlugins ? kHomeMenuItemCount : kHomeMenuItemCount - 1;
   const bool showContinueReading = metrics.homeContinueReadingInMenu && !recentBooks.empty();
   std::vector<const char*> menuItems;
   std::vector<UIIcon> menuIcons;
   menuItems.reserve(homeMenuItemCount + (showContinueReading ? 1 : 0));
   menuIcons.reserve(homeMenuItemCount + (showContinueReading ? 1 : 0));
   for (int i = 0; i < homeMenuItemCount; ++i) {
-    const HomeMenuEntry* entry = menuEntryAtIndex(i, hasLibrarySlot(), isCarousel);
-    menuItems.push_back(entry->item == HomeMenuItem::OPDS_BROWSER && hasPlugins ? tr(STR_PLUGINS)
-                                                                                : I18N.get(entry->label));
-    menuIcons.push_back(entry->item == HomeMenuItem::OPDS_BROWSER && hasPlugins ? Plugins : entry->icon);
+    const HomeMenuEntry* entry = menuEntryAtIndex(i, hasPlugins, isCarousel);
+    menuItems.push_back(I18N.get(entry->label));
+    menuIcons.push_back(entry->icon);
   }
 
   if (showContinueReading) {
@@ -745,6 +745,14 @@ void HomeActivity::render(RenderLock&&) {
         [&menuIcons](int index) { return menuIcons[index]; });
   };
 
+  // A cover snapshot from the other output polarity holds the other byte form (night mode keeps images pre-inverted so
+  // they stay positive): pasting it back after a theme switch showed the cover as a negative. Redraw it instead.
+  if (coverBufferStored && coverBufferInverted != renderer.isInverted()) {
+    freeCoverBuffer();
+    coverRendered = false;
+    requestCarouselUpdate(CarouselUpdateScope::Full);
+  }
+
   const CarouselUpdateScope updateScope = carouselUpdateScope.exchange(CarouselUpdateScope::None);
   const bool menuOnlyUpdate = canRenderCarouselMenuOnly(isCarousel, recentsLoaded, updateScope);
   if (menuOnlyUpdate) {
@@ -763,30 +771,37 @@ void HomeActivity::render(RenderLock&&) {
 
   renderer.clearScreen();
   if (coverGridUi) {
-    coverGridUi->setSelection(selectorIndex);
-    UITheme::getInstance().drawCoverGridHome(*coverGridUi);
-    // Front Left/Right walk the tabs, so their hints read Left/Right; the
-    // side page buttons (unhinted) walk the covers.
-    const auto labels = mappedInput.mapLabels(backLabel, tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    renderer.displayBuffer(!firstRenderDone ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
+    const auto drawGrid = [&] {
+      renderer.clearScreen();
+      coverGridUi->setSelection(selectorIndex);
+      UITheme::getInstance().drawCoverGridHome(*coverGridUi);
+      // Front Left/Right walk the tabs, so their hints read Left/Right; the
+      // side page buttons (unhinted) walk the covers.
+      const auto labels = mappedInput.mapLabels(backLabel, tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    };
+    drawGrid();
     // Slot heights are recorded during the draw above; a change (first layout
     // pass, orientation switch) means the paths must point at those sizes and
-    // any missing thumbs must be generated. Refreshing the paths right away
-    // lets the next pass draw already-cached thumbs before generation runs.
-    const bool coverSpecChanged = coverGridUi->takeThumbHeightChanged();
-    if (coverSpecChanged) {
+    // any missing thumbs must be generated. Resolve the covers before the
+    // panel is touched and redraw into the framebuffer, so Home paints once
+    // instead of three e-ink refreshes (placeholder, placeholder, covers).
+    if (coverGridUi->takeThumbHeightChanged()) {
       coverGridUi->refreshCoverPaths();
       recentsLoaded = false;
     }
-    if (!firstRenderDone) {
-      firstRenderDone = true;
-      requestUpdate();
-    } else if (!recentsLoaded && !recentsLoading) {
+    if (!recentsLoaded && !recentsLoading) {
       loadRecentCovers(CoverGridHomeUi::THUMB_HEIGHT);
       coverGridUi->refreshCoverPaths();
-      requestUpdate();
+      drawGrid();
+      if (coverGridUi->takeThumbHeightChanged()) {
+        coverGridUi->refreshCoverPaths();
+        recentsLoaded = false;
+        requestUpdate();
+      }
     }
+    renderer.displayBuffer(!firstRenderDone ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
+    firstRenderDone = true;
     return;
   }
   bool bufferRestored = coverRendered && coverBufferStored && restoreCoverBuffer();
@@ -846,8 +861,6 @@ void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
 
 void HomeActivity::onFileTransferOpen() { activityManager.goToFileTransfer(); }
 
-void HomeActivity::onOpdsBrowserOpen() { activityManager.goToBrowser(); }
-
 void HomeActivity::onAppsOpen() { activityManager.goToApps(); }
 
-void HomeActivity::onPluginsOpen() { activityManager.goToPlugins(hasOpdsServers); }
+void HomeActivity::onPluginsOpen() { activityManager.goToPlugins(); }

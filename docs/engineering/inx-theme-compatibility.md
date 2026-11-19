@@ -378,3 +378,13 @@ without a frontlight. ReadPico therefore shows the upstream night-mode, refresh,
 orientation and touch-control tiles, while capability checks omit unavailable
 light sliders. These surfaces keep the explicit high-density control sizes and
 board safe area. Historical INX traces are not rewritten for this exception.
+
+### Approved native16 glyph ink correction
+
+The fixed upstream rehearsal explicitly approves correcting requested white ink
+for native16 four-bit glyphs, including INX. Normal and rotated glyphs map
+coverage toward the requested ink; zero coverage remains transparent. The former
+black-only native eligibility condition must not route white glyphs through the
+two-bit fallback. This is a narrow selection/antialiasing pixel exception, with
+no layout, font, metric, buffer, or allocation change. Preserve historical
+baselines and record same-content original/candidate whole-page differences.

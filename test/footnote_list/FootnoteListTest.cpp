@@ -45,7 +45,7 @@ bool ImageBlock::ensureExtracted(CancelCheck) { return false; }
 bool ImageBlock::cacheDecodedImage(GfxRenderer&, int, int, CancelCheck) { return false; }
 void GfxRenderer::drawLine(int, int, int, int, int, bool) const {}
 void GfxRenderer::fillRect(int, int, int, int, bool) const {}
-void GfxRenderer::fillRectDither(int, int, int, int, Color) const {}
+void GfxRenderer::fillRectDither(int, int, int, int, Color, DitherMode) const {}
 int GfxRenderer::drawScaledCodepoint(int, uint32_t, EpdFontFamily::Style, int, int, int) const { return 0; }
 
 TEST(FootnoteList, AllocatesOnceAndMovesItsBoundedStorage) {

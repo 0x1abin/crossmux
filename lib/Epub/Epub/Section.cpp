@@ -58,10 +58,11 @@ namespace {
 //   84 / 85 - CSS font variants, page boxes/drop caps, inheritance, and GIF layout
 //   88 / 89 - font-size line spacing, ruby space-around, RTL focus offsets and TTF advances
 //   86 / 87 - literal-space justification, wrapped NBSP, RTL gaps, and bounded drop-cap hyphenation
+//   90 / 91 - deferred TTF advance rounding, RTL mirrors, and heading hyphenation
 #ifdef ENABLE_CHINESE_VERSION
-constexpr uint8_t SECTION_FILE_VERSION = 89;
+constexpr uint8_t SECTION_FILE_VERSION = 91;
 #else
-constexpr uint8_t SECTION_FILE_VERSION = 88;
+constexpr uint8_t SECTION_FILE_VERSION = 90;
 #endif
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /

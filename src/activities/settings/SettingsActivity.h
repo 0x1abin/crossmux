@@ -38,6 +38,10 @@ enum class SettingAction {
   KeyboardLayouts,
   HomeButton,
   TapZones,
+  ControlsPower,
+  ControlsFront,
+  ControlsSide,
+  ControlsTouch,
 };
 
 struct SettingInfo {
@@ -226,8 +230,11 @@ struct SettingInfo {
   }
 };
 
+enum class ControlsGroup : uint8_t { Root, Power, Front, Side, Touch };
+
 class SettingsActivity final : public UiTabListActivity {
   const SettingsSection section;
+  const ControlsGroup controlsGroup;
   int selectedCategoryIndex = 0;  // Currently selected category
   int settingsCount = 0;
   uint8_t expandedCategories = 0;
@@ -262,6 +269,7 @@ class SettingsActivity final : public UiTabListActivity {
   int tabCount() const override { return section == SettingsSection::End ? categoryCount : 0; }
   int activeTab() const override { return selectedCategoryIndex; }
   const char* tabLabel(int index) const override { return I18N.get(categoryNames[index]); }
+  const char* headerTitle() const override;
   void buildScreen(UiScreen& screen) override;
   void activateIndex(int index) override;
   freeink::ui::ListNav& activeNav() override;
@@ -281,6 +289,7 @@ class SettingsActivity final : public UiTabListActivity {
   void toggleAccordionSetting(int categoryIndex, int settingIndex);
   void toggleAccordionCategory(int categoryIndex);
   bool usesAccordion() const;
+  bool usesControlsGroups() const;
   const std::vector<SettingInfo>& settingsForCategory(int categoryIndex) const;
   std::array<int, categoryCount> accordionSettingCounts() const;
   void openOtaUpdate();
@@ -297,7 +306,8 @@ class SettingsActivity final : public UiTabListActivity {
 
  public:
   explicit SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                            SettingsSection section = SettingsSection::End);
+                            SettingsSection section = SettingsSection::End,
+                            ControlsGroup controlsGroup = ControlsGroup::Root);
   void onEnter() override;
   void onExit() override;
   void render(RenderLock&&) override;

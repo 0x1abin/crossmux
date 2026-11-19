@@ -253,7 +253,7 @@ def main():
                    *('-I' + str(path) for path in includes), str(work / 'check.cpp'),
                    str(ROOT / 'lib/Epub/Epub/BookMetadataCache.cpp'),
                    str(ROOT / 'lib/FsHelpers/FsHelpers.cpp'), str(ROOT / 'lib/Utf8/Utf8.cpp'),
-                   str(simulator / 'src/HalStorage.cpp'), '-o', str(work / 'check')]
+                   str(simulator / 'src/HalStorage.cpp'), str(simulator / 'src/SimLog.cpp'), '-pthread', '-o', str(work / 'check')]
         subprocess.run(command, check=True)
         (work / 'sd').mkdir()
         subprocess.run([str(work / 'check'), str(work / 'sd')], check=True)

@@ -26,6 +26,9 @@ enum class WebServerActivityState {
  *  - Construct CrossPointWebServer and run handleClient() from loop().
  *  - On Back, shut down WiFi and reboot via silentRestart() to release the
  *    networking stack cleanly.
+ *
+ * File Transfer also exposes OPDS regardless of plugin settings or configured
+ * servers; that route hands off before Wi-Fi starts so the browser owns it.
  */
 class CrossPointWebServerActivity final : public Activity {
   WebServerActivityState state = WebServerActivityState::MODE_SELECTION;

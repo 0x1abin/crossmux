@@ -20,7 +20,7 @@ FetchContent_Declare(
 FetchContent_Declare(
   crosspoint_simulator
   GIT_REPOSITORY https://github.com/0x1abin/crosspoint-simulator.git
-  GIT_TAG e1126680507f33bd35239aa90d32be198124ad34
+  GIT_TAG e8a64964ea36982c3f8caca02a8d64162a06a58c
 )
 
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
@@ -41,6 +41,8 @@ endif()
 set(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 add_library(crosspoint_test_common INTERFACE)
+add_library(crosspoint_simulator_log STATIC ${crosspoint_simulator_SOURCE_DIR}/src/SimLog.cpp)
+target_link_libraries(crosspoint_test_common INTERFACE crosspoint_simulator_log)
 target_include_directories(crosspoint_test_common INTERFACE
   ${REPO_ROOT}
   ${REPO_ROOT}/lib
@@ -277,6 +279,7 @@ add_test(NAME PowerConfirmRelease COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/tes
 
 add_subdirectory(persistable_store)
 add_test(NAME RemoteButtonInputIntegration COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_remote_button_input.py)
+add_test(NAME SideButtonOrientation COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_side_button_orientation.py)
 add_test(NAME confirmation_translations COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_confirmation_translations.py)
 add_test(NAME BleLearning COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_ble_learning.py)
 add_subdirectory(ble_link_note_title)
@@ -286,6 +289,7 @@ add_subdirectory(ble_remote_turn_gate)
 add_subdirectory(${REPO_ROOT}/lib/BlePageTurner/test BlePageTurnerTests)
 
 add_test(NAME selection_buttons COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_selection_buttons.py)
+add_test(NAME button_remap_release COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_button_remap_release.py)
 add_test(NAME list_viewport COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_list_viewport.py)
 add_test(NAME clipping_highlight_planes COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_clipping_highlight_planes.py)
 add_test(NAME clipping_selection_text COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_clipping_selection_text.py)
@@ -311,3 +315,30 @@ add_test(NAME OpdsSafety
 add_test(NAME ReaderPluginSync COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_reader_plugin_sync.py)
 
 add_test(NAME OpdsRowBudget COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_opds_row_budget.py)
+
+add_subdirectory(ttf_face_sharing)
+
+add_subdirectory(vocabulary_store)
+
+add_test(NAME ControlsGroups COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_controls_groups.py)
+add_test(NAME OpdsNavigation COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_opds_navigation.py)
+
+add_test(NAME FileExtensions COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_file_extensions.py)
+add_test(NAME HomeCoverSync COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_home_cover_sync.py)
+add_test(NAME ReaderLayoutSync COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_reader_layout_sync.py)
+
+add_test(NAME OptionPopupSync COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_option_popup_sync.py)
+FetchContent_GetProperties(arduinojson)
+add_test(NAME PluginTokenTransaction COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_plugin_token_transaction.py ${arduinojson_SOURCE_DIR}/src)
+add_test(NAME WebdavProtectedPaths COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_webdav_protected_paths.py ${crosspoint_simulator_SOURCE_DIR})
+add_test(NAME KoreaderAuthHeaders COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_koreader_auth_headers.py)
+
+add_test(NAME AboutInformation COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_about_information.py ${crosspoint_simulator_SOURCE_DIR})
+add_test(NAME ScreenshotOrientation COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_screenshot_orientation.py)
+add_test(NAME PluginNotice COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_plugin_notice.py ${arduinojson_SOURCE_DIR}/src ${crosspoint_simulator_SOURCE_DIR})
+
+add_test(NAME PluginUpdateOrder COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_plugin_update_order.py ${arduinojson_SOURCE_DIR}/src)
+add_test(NAME SdFontUpstreamPresets COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_sd_font_upstream_presets.py)
+add_test(NAME CppcheckDependency COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_cppcheck_dependency.py)
+
+add_test(NAME SleepScreenPickerOrder COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_sleep_screen_picker_order.py)

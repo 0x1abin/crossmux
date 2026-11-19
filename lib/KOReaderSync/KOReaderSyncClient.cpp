@@ -4,8 +4,9 @@
 #include <HalMemory.h>
 #include <Logging.h>
 #include <SecureHttpClient.h>
-#include <base64.h>
+#include <strings.h>
 
+#include <algorithm>
 #include <string>
 
 #include "KOReaderCredentialStore.h"
@@ -52,9 +53,11 @@ void applyAuthHeaders(freeink::SecureHttpClient& http) {
   http.addHeader("Accept", "application/vnd.koreader.v1+json");
   http.addHeader("x-auth-user", KOREADER_STORE.getUsername());
   http.addHeader("x-auth-key", KOREADER_STORE.getMd5Password());
-  const std::string credentials = KOREADER_STORE.getUsername() + ":" + KOREADER_STORE.getPassword();
-  const String encoded = base64::encode(credentials.c_str());
-  http.addHeader("Authorization", std::string("Basic ") + encoded.c_str());
+  const auto& custom = KOREADER_STORE.getCustomHeaders();
+  const bool hasAuthorization = std::any_of(custom.begin(), custom.end(), [](const auto& header) {
+    return isValidHttpHeader(header) && strcasecmp(header.name.c_str(), "Authorization") == 0;
+  });
+  if (!hasAuthorization) http.addHeader("Authorization", KOREADER_STORE.getBasicAuthorization());
 }
 
 // Caller-configured headers (e.g. a Cloudflare Access service token) applied

@@ -24,6 +24,8 @@ class BookCoverLoaderTest : public ::testing::Test {
     ASSERT_EQ(setenv("CROSSPOINT_SIM_SD", root.c_str(), 1), 0);
     ASSERT_TRUE(Storage.begin());
     cover_stub::epubThumbnailGenerations = 0;
+    cover_stub::sourceThumbnailGenerations = 0;
+    cover_stub::epubMetadataCached = true;
     cover_stub::fullCoverGenerations = 0;
     cover_stub::overrideConversions = 0;
   }
@@ -91,6 +93,28 @@ TEST_F(BookCoverLoaderTest, GeneratesAndReusesMissingThumbnail) {
   EXPECT_EQ(BookCoverLoader::ensureThumbnail("/book.epub", 226, &generated), "/.crosspoint/epub/thumb_226.bmp");
   EXPECT_FALSE(generated);
   EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
+}
+
+TEST_F(BookCoverLoaderTest, RegeneratesFromSourceAfterMetadataCacheDeletion) {
+  writeBook("/book.epub");
+  cover_stub::epubMetadataCached = false;
+  bool generated = false;
+  EXPECT_EQ(BookCoverLoader::ensureThumbnail("/book.epub", 226, &generated), "/.crosspoint/epub/thumb_226.bmp");
+  EXPECT_TRUE(generated);
+  EXPECT_EQ(cover_stub::sourceThumbnailGenerations, 1);
+  EXPECT_EQ(BookCoverLoader::ensureThumbnail("/book.epub", 226, &generated), "/.crosspoint/epub/thumb_226.bmp");
+  EXPECT_FALSE(generated);
+  EXPECT_EQ(cover_stub::sourceThumbnailGenerations, 1);
+}
+
+TEST_F(BookCoverLoaderTest, SourceFailureDoesNotProduceAReadyThumbnail) {
+  writeBook("/load-fail.epub");
+  cover_stub::epubMetadataCached = false;
+  bool generated = true;
+  EXPECT_TRUE(BookCoverLoader::ensureThumbnail("/load-fail.epub", 226, &generated).empty());
+  EXPECT_FALSE(generated);
+  EXPECT_EQ(cover_stub::sourceThumbnailGenerations, 1);
+  EXPECT_FALSE(std::filesystem::exists(hostPath("/.crosspoint/epub/thumb_226.bmp")));
 }
 
 TEST_F(BookCoverLoaderTest, GeneratesEachThumbnailHeightOnlyOnce) {

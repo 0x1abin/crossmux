@@ -47,7 +47,7 @@ code = r'''
 #include <functional>
 #include <string>
 #include <vector>
-#include "FreeInkUICore.h"
+#include "FreeInkUI.h"
 #include "InxItemLayout.h"
 namespace fui=freeink::ui;
 namespace haptic_feedback {inline void touchAction(bool=false){}}
@@ -66,7 +66,8 @@ fui::InputSnapshot touchSnapshotFrom(const MappedInputManager& i){return i.snap;
 struct OptionPopup {
  bool upstreamStyle=false,active=true,ignoreInitialTouchContact=false,ignoreInitialConfirmRelease=false;
  bool confirmBarrierPending=false,uiReady=true;
- int selectedIndex=0;mutable std::atomic<int> firstOption{-1},visibleOptionRows{1};std::string message;
+ std::atomic<int> selectedIndex{0};mutable std::atomic<int> firstOption{-1},visibleOptionRows{1},pendingScroll{0};
+ mutable std::atomic<bool> followSelection{true};std::string message;
  static constexpr int MAX_OPTIONS=24;
  static constexpr fui::ActionId ACTION_OPTION=1,ACTION_CHROME=2;
  std::vector<std::string> ownedStrings=std::vector<std::string>(12,"option");
@@ -104,14 +105,14 @@ int main(){
   auto row=layout.optionRect(1);input.snap.touchPressed=true;input.snap.touchX=row.x+5;input.snap.touchY=row.y+5;
   p.handleInput(input,update);assert(p.selectedIndex==layout.first+1);
   input.snap={};input.snap.touchReleased=true;input.snap.touchX=input.snap.touchY=-1;input.swipe=MappedInputManager::SwipeDir::Up;
-  p.handleInput(input,update);assert(p.selectedIndex==layout.rows+1&&p.active&&calls==0);
+  p.handleInput(input,update);assert(p.selectedIndex==layout.first+1&&p.active&&calls==0);
   assert(p.interactions.activeIndex()<0);p.publish(safe);
   input={};input.snap.touchReleased=true;input.snap.touchX=input.snap.touchY=-1;p.handleInput(input,update);
   assert(p.active&&calls==0);
   for(int i=0;i<20;++i){input={};input.swipe=MappedInputManager::SwipeDir::Up;p.handleInput(input,update);p.publish(safe);}
-  assert(p.selectedIndex==11&&p.active&&calls==0);
+  assert(p.selectedIndex==layout.first+1&&p.firstOption==12-layout.rows&&p.active&&calls==0);
   for(int i=0;i<20;++i){input={};input.swipe=MappedInputManager::SwipeDir::Down;p.handleInput(input,update);p.publish(safe);}
-  assert(p.selectedIndex==0&&p.active&&calls==0);
+  assert(p.selectedIndex==layout.first+1&&p.firstOption==0&&p.active&&calls==0);
   layout=InxOptionGeometry::layout(safe,12,0);row=layout.optionRect(1);
   input={};input.snap.touchPressed=true;input.snap.touchX=row.x+row.width/2;input.snap.touchY=row.y+row.height/2;
   p.handleInput(input,update);assert(p.selectedIndex==layout.first+1);
@@ -270,7 +271,7 @@ int main(){
   int selected=-1,calls=0;
   p.finishShow(27,[&](int i){selected=i;++calls;});
   p.publish(Rect{0,0,480,750});
-  assert(p.selectedIndex==27 && p.firstOption==25);
+  assert(p.selectedIndex==27 && p.firstOption==(upstream?23:25));
   for(int i=0;i<12;++i) p.handleButtons(false,true,false,false,[]{});
   p.publish(Rect{0,0,480,750});
   assert(p.selectedIndex==39 && p.firstOption==35);
@@ -287,7 +288,7 @@ with tempfile.TemporaryDirectory(prefix='touch-network-') as directory:
     for high in (False,True):
         source=directory/'popup.cpp';source.write_text(code)
         binary=directory/'popup'
-        command=['c++','-std=c++20','-I'+str(ROOT/'src'),'-I'+str(SDK/'libs/ui/FreeInkUI/include'),str(source),'-o',str(binary)]
+        command=['c++','-std=c++20','-I'+str(ROOT/'src'),'-I'+str(SDK/'libs/ui/FreeInkUI/include'),str(source),str(SDK/'libs/ui/FreeInkUI/src/FreeInkUI.cpp'),'-o',str(binary)]
         if high:command.insert(2,'-DCROSSMUX_UI_PROFILE_HIGH_DPI=1')
         subprocess.run(command,check=True);subprocess.run([str(binary)],check=True)
 

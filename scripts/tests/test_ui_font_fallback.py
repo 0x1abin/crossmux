@@ -169,7 +169,7 @@ size_t heap_caps_get_free_size(int) { return 1024*1024; }
 struct TtfEpdFont {
   static inline int failSize=0;
   int size=0;
-  bool load(int pt,bool,int,int) { size=pt;return pt!=failSize; }
+  bool loadVariantOf(const TtfEpdFont& master,int pt,bool,int,int) { assert(master.size==14);size=pt;return pt!=failSize; }
   int family() const { return size; }
 };
 template<class T> auto makeUniqueNoThrow() { return std::make_unique<T>(); }
@@ -184,6 +184,7 @@ struct GfxRenderer {
 };
 struct SdCardFontSystem {
   std::string ttfFamily_="SD";
+  TtfEpdFont master{14};TtfEpdFont* ttf_=&master;
   std::vector<std::unique_ptr<TtfEpdFont>> ttfUi_;
   std::vector<int> ttfUiIds_;
   void addTtfSources(TtfEpdFont&) {}

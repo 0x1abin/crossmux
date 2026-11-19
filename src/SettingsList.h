@@ -307,6 +307,42 @@ inline void setPageTurnGestureFromDisplayValue(uint8_t& field, const uint8_t dis
   }
 }
 
+inline std::span<const uint8_t> doublePowerButtonValues() {
+  static constexpr uint8_t TOUCH[] = {CrossPointSettings::IGNORE,          CrossPointSettings::SLEEP,
+                                      CrossPointSettings::PAGE_TURN,       CrossPointSettings::FORCE_REFRESH,
+                                      CrossPointSettings::FOOTNOTES,       CrossPointSettings::PWR_CONFIRM,
+                                      CrossPointSettings::CREATE_CLIPPING, CrossPointSettings::PWR_FRONTLIGHT};
+  static constexpr uint8_t BUTTONS[] = {CrossPointSettings::IGNORE,        CrossPointSettings::SLEEP,
+                                        CrossPointSettings::PAGE_TURN,     CrossPointSettings::FORCE_REFRESH,
+                                        CrossPointSettings::FOOTNOTES,     CrossPointSettings::CREATE_CLIPPING,
+                                        CrossPointSettings::PWR_FRONTLIGHT};
+  return BoardConfig::hasTouch() ? std::span<const uint8_t>(TOUCH) : std::span<const uint8_t>(BUTTONS);
+}
+
+inline SettingInfo buildDoublePowerButtonSetting() {
+  auto labels = buildShortPowerButtonValues();
+  labels.push_back(StrId::STR_FRONTLIGHT);
+  return SettingInfo::DynamicEnum(
+      StrId::STR_POWER_DOUBLE_CLICK, std::move(labels),
+      []() -> uint8_t {
+        const auto values = doublePowerButtonValues();
+        for (size_t i = 0; i < values.size(); ++i) {
+          if (values[i] == SETTINGS.doublePwrBtn) return static_cast<uint8_t>(i);
+        }
+        return 0;
+      },
+      [](uint8_t value) {
+        const auto values = doublePowerButtonValues();
+        if (value >= values.size()) {
+          SETTINGS.doublePwrBtn = CrossPointSettings::IGNORE;
+          return;
+        }
+        SETTINGS.doublePwrBtn = values[value];
+      },
+      "doublePwrBtn", StrId::STR_CAT_CONTROLS, &CrossPointSettings::doublePwrBtn,
+      CrossPointSettings::SHORT_PWRBTN_COUNT);
+}
+
 inline std::vector<StrId> homeThemeValues() {
   static constexpr StrId VALUES[] = {StrId::STR_THEME_CLASSIC,       StrId::STR_THEME_LYRA,
                                      StrId::STR_THEME_LYRA_EXTENDED, StrId::STR_THEME_ROUNDEDRAFF,
@@ -384,8 +420,9 @@ inline bool isSettingAvailableOnBoard(const SettingInfo& setting);
 // during the callback; move from it to keep it.
 template <typename Wants, typename Visit>
 void forEachSetting(const SdCardFontRegistry* registry, const std::vector<DictionaryEntry>* dictionaries, Wants wants,
-                    Visit visit) {
+                    Visit visit, bool knownDictionary = false) {
   bool dictionaryPending = dictionaries && !dictionaries->empty();
+  const bool dictionaryAvailable = dictionaryPending || knownDictionary;
   const auto visitDictionary = [&] {
     dictionaryPending = false;
     if (!wants(DICTIONARY_SETTING_KEY)) return;
@@ -394,6 +431,10 @@ void forEachSetting(const SdCardFontRegistry* registry, const std::vector<Dictio
   };
   auto each = [&](SettingInfo& s) {
     if (isHiddenOnDevice(s) || !isSettingAvailableOnBoard(s)) return;
+    if (s.valuePtr == &CrossPointSettings::vocabularyHistoryEnabled) {
+      if (!dictionaryAvailable) return;
+      if (dictionaryPending) visitDictionary();
+    }
     if (dictionaryPending && s.category == StrId::STR_CAT_CONTROLS) visitDictionary();
     if (!wants(s.key)) return;
     buildFontOptions(s, registry);
@@ -412,7 +453,7 @@ void forEachSetting(const SdCardFontRegistry* registry, const std::vector<Dictio
 }
 
 inline bool isSettingAvailableOnBoard(const SettingInfo& setting) {
-  if (setting.nameId == StrId::STR_DBL_CLICK_PWR_LIGHT && !BoardConfig::isX4Pro()) return false;
+  if (setting.nameId == StrId::STR_POWER_DOUBLE_CLICK && !BoardConfig::isX4Pro()) return false;
   if (setting.nameId == StrId::STR_TILT_PAGE_TURN && !halTiltSensor.isAvailable()) return false;
   if (!BoardConfig::hasTouch() &&
       (setting.nameId == StrId::STR_TOUCH_READER_CONTROLS || setting.nameId == StrId::STR_NEXT_PAGE_GESTURE ||
@@ -463,12 +504,14 @@ inline void forEachSettingsListEntry(const SdCardFontRegistry* registry, Callbac
 // Device settings need an owned list because they retain category entries and
 // may insert a dynamically discovered dictionary entry.
 inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* registry = nullptr,
-                                                const std::vector<DictionaryEntry>* dictionaries = nullptr) {
+                                                const std::vector<DictionaryEntry>* dictionaries = nullptr,
+                                                bool knownDictionary = false) {
   std::vector<SettingInfo> v;
   // Room for every base entry and the dictionary, so the list never reallocates.
   v.reserve(countBaseSettings() + (BoardConfig::hasHomeKey() ? 3 : 0) +
             (dictionaries && !dictionaries->empty() ? 1 : 0));
   forEachSetting(
-      registry, dictionaries, [](const char*) { return true; }, [&v](SettingInfo& s) { v.push_back(std::move(s)); });
+      registry, dictionaries, [](const char*) { return true; }, [&v](SettingInfo& s) { v.push_back(std::move(s)); },
+      knownDictionary);
   return v;
 }

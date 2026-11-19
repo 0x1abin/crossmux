@@ -7,6 +7,8 @@
 
 namespace cover_stub {
 inline int epubThumbnailGenerations = 0;
+inline int sourceThumbnailGenerations = 0;
+inline bool epubMetadataCached = true;
 inline int fullCoverGenerations = 0;
 inline int overrideConversions = 0;
 

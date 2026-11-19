@@ -27,18 +27,28 @@ class HttpDownloader {
  enum DownloadError {OK,HTTP_ERROR,FILE_ERROR,ABORTED,UNAUTHORIZED};
  using Header=std::pair<std::string,std::string>;
  using DataCallback=std::function<bool(const uint8_t*,size_t)>;
- struct FetchOptions {std::string username,password,bearer,accept,acceptLanguage;std::vector<Header> headers;int* statusOut=nullptr;bool captureErrorBody=false;};
+ struct FetchOptions {std::string username,password,bearer,accept,acceptLanguage;std::vector<Header> headers;int* statusOut=nullptr;bool captureErrorBody=false;std::string* wwwAuthenticateOut=nullptr;bool* redirectedOut=nullptr;};
  static constexpr uint32_t MIN_TLS_FREE_HEAP=40000;
  static constexpr uint32_t MIN_TLS_MAX_ALLOC=20000;
  inline static bool tlsOk=true;inline static int gets=0,posts=0;
  inline static size_t licenseBytes=128;
+ inline static int statusCode=200, unauthorizedStatus=401, getFailures=0, coverFailures=0, coverDownloads=0;
+ inline static bool redirected=false;
+ inline static std::string challenge="Basic realm=books";
+ static int lastStatus(){return statusCode;}
+ static bool lastAnswerRedirected(){return redirected;}
  static FetchOptions last;
  inline static std::string lastPost;
  inline static std::string lastDownloadUser;
  inline static std::vector<Header> lastDownloadHeaders;
  static bool hasMemoryForTls(){return tlsOk;}
  static bool fetchUrl(const std::string&,const DataCallback& sink,const FetchOptions& options) {
-  ++gets;last=options;if(options.statusOut)*options.statusOut=200;
+  ++gets;last=options;statusCode=getFailures>0?unauthorizedStatus:200;
+  if(getFailures>0)--getFailures;
+  if(options.statusOut)*options.statusOut=statusCode;
+  if(options.wwwAuthenticateOut)*options.wwwAuthenticateOut=challenge;
+  if(options.redirectedOut)*options.redirectedOut=redirected;
+  if(statusCode!=200)return false;
   const std::string body(licenseBytes,'x');
   for(size_t pos=0;pos<body.size();pos+=1024)
    if(!sink(reinterpret_cast<const uint8_t*>(body.data()+pos),std::min<size_t>(1024,body.size()-pos)))return false;
@@ -49,7 +59,9 @@ class HttpDownloader {
  }
  static DownloadError downloadToFile(const std::string&,const std::string&,
    std::nullptr_t,std::nullptr_t,const std::string& user,const std::string&,const std::vector<Header>& headers) {
-  lastDownloadUser=user;lastDownloadHeaders=headers;return OK;
+  lastDownloadUser=user;lastDownloadHeaders=headers;++coverDownloads;
+  if(coverFailures>0){--coverFailures;statusCode=unauthorizedStatus;return UNAUTHORIZED;}
+  statusCode=200;return OK;
  }
 };
 inline HttpDownloader::FetchOptions HttpDownloader::last;
@@ -68,6 +80,7 @@ HARNESS=r'''
 #include "Memory.h"
 #include "network/HttpDownloader.h"
 #include "network/OpdsHttpTransport.h"
+#include <ResumableFetch.h>
 #define LOG_ERR(...) ((void)0)
 #define LOG_DBG(...) ((void)0)
 #define LOG_INF(...) ((void)0)
@@ -124,7 +137,10 @@ enum class StrId {STR_DOWNLOAD_FAILED,STR_OPDS_NOT_A_BOOK,STR_LCP_OFFICIAL_BUILD
 constexpr auto STR_LOADING=StrId::STR_LOADING;
 const char* tr(StrId){return "";}
 struct Client {
- freeink::opds::HttpAuth downloadAuth() const{return {"u","p","token",{{"X-Secret","secret"}}};}
+ int authCalls=0;bool authOk=true,dirty=false;
+ bool authenticateDownload(const std::string&){++authCalls;dirty=true;return authOk;}
+ bool tokensDirty()const{return dirty;}
+ freeink::opds::HttpAuth downloadAuth() const{return {"u","p",authCalls?"fresh":"token",{{"X-Secret","secret"}}};}
  bool resolveIndirect(const std::string&,std::string&,bool&){return false;}
 };
 struct RenderLock { RenderLock() = default; template<class T> explicit RenderLock(T&) {} ~RenderLock() {} void unlock() {} };
@@ -137,7 +153,7 @@ struct OpdsBookBrowserActivity {
  Client opdsClient;
  enum class LcpUnlock {Ok,WrongPassphrase,Failed};
  struct LcpWrappedKey {std::string epk,iv,ct,tag;};
- int releases=0,downloads=0,unlocks=0;
+ int releases=0,downloads=0,unlocks=0,persists=0,unauthorizedDownloads=0;
  StrId error=StrId::STR_LOADING;
  HttpDownloader::DownloadError result=HttpDownloader::OK,finished=HttpDownloader::HTTP_ERROR;
  std::string incoming="PK\3\4book";
@@ -151,6 +167,8 @@ struct OpdsBookBrowserActivity {
  void downloadBook(const OpdsEntry&);
  void downloadLcpBook(const OpdsEntry&);
  void loadDetailCover(const std::string&,const std::string&);
+ bool refreshDownloadAuth(const std::string&);
+ bool persistTokens(){++persists;return true;}
  LcpUnlock requestLcpUnlock(const std::string&);
  void startLcpUnlock(){++unlocks;}
  void finishDownload(HttpDownloader::DownloadError value){finished=value;}
@@ -161,9 +179,13 @@ struct OpdsBookBrowserActivity {
   (void)password;(void)body;(void)contentType;
   assert(user.empty() || user=="u");(void)headers;
   ++downloads;
-  if(result==HttpDownloader::OK)Storage.files[path]=incoming;
+  HttpDownloader::lastDownloadHeaders=headers;
+  auto outcome=result;
+  if(unauthorizedDownloads>0){--unauthorizedDownloads;outcome=HttpDownloader::UNAUTHORIZED;}
+  HttpDownloader::statusCode=outcome==HttpDownloader::UNAUTHORIZED?HttpDownloader::unauthorizedStatus:200;
+  if(outcome==HttpDownloader::OK)Storage.files[path]=incoming;
   else Storage.files[path+".part"]="partial";
-  return result;
+  return outcome;
  }
 };
 '''
@@ -172,6 +194,8 @@ void reset() {
  Storage.files={{"/.crosspoint",""},{"/Books/existing.epub","old book"}};
  Storage.replaceOk=true;invalidations=registrations=0;
  HttpDownloader::gets=HttpDownloader::posts=0;HttpDownloader::tlsOk=true;HttpDownloader::licenseBytes=128;
+ HttpDownloader::statusCode=200;HttpDownloader::unauthorizedStatus=401;HttpDownloader::redirected=false;
+ HttpDownloader::getFailures=HttpDownloader::coverFailures=HttpDownloader::coverDownloads=0;
  HalMemory::heap={1000000,1000000};LCP_DEVICE.enrolled=false;
 }
 int main() {
@@ -184,7 +208,10 @@ int main() {
  assert(transport.authFor("https://catalog.test:443/page",auth).headers.size()==1);
  transport.get("https://cdn.test/feed",auth,"application/opds+json","zh",false,[](const uint8_t*,size_t){return true;});
  assert(HttpDownloader::last.username.empty()&&HttpDownloader::last.bearer.empty()&&HttpDownloader::last.headers.empty());
- transport.get("https://catalog.test/feed",auth,nullptr,nullptr,false,[](const uint8_t*,size_t){return true;});
+ HttpDownloader::redirected=true;
+ const auto meta=transport.get("https://catalog.test/feed",auth,nullptr,nullptr,false,[](const uint8_t*,size_t){return true;});
+ assert(meta.wwwAuthenticate=="Basic realm=books"&&meta.redirected&&meta.status==200);
+ HttpDownloader::redirected=false;
  assert(HttpDownloader::last.username=="u"&&HttpDownloader::last.bearer=="token"&&HttpDownloader::last.headers.size()==1);
  std::string response;int status=0;
  transport.postForm("https://sso.test/token","explicit-password-body",response,status);
@@ -236,7 +263,29 @@ int main() {
  assert(Storage.files["/Books/existing.epub"]=="PK\3\4book"&&registrations==1&&invalidations==1);
  assert(cachePath=="/Books/existing.epub");
  for(const auto& [name,data]:Storage.files)assert(name.find(".download")==std::string::npos);
- puts("OPDS initial-origin credentials, license budgets/availability and verified acquisition transactions passed");
+
+ reset();OpdsBookBrowserActivity renewed;renewed.opdsTransport.setServerUrl(renewed.server.url);renewed.unauthorizedDownloads=1;
+ renewed.downloadBook(book);assert(renewed.downloads==2&&renewed.opdsClient.authCalls==1&&renewed.persists==1);
+ assert(renewed.finished==HttpDownloader::OK&&HttpDownloader::lastDownloadHeaders.back().second=="Bearer fresh");
+ reset();OpdsBookBrowserActivity twice;twice.opdsTransport.setServerUrl(twice.server.url);twice.result=HttpDownloader::UNAUTHORIZED;
+ twice.downloadBook(book);assert(twice.downloads==2&&twice.opdsClient.authCalls==1&&twice.persists==1);
+ assert(Storage.files["/Books/existing.epub"]=="old book");
+ reset();OpdsBookBrowserActivity dead;dead.opdsTransport.setServerUrl(dead.server.url);dead.result=HttpDownloader::UNAUTHORIZED;dead.opdsClient.authOk=false;
+ dead.downloadBook(book);assert(dead.downloads==1&&dead.opdsClient.authCalls==1&&dead.persists==1);
+ for(int failure=0;failure<3;++failure){
+  reset();OpdsBookBrowserActivity refused;refused.opdsTransport.setServerUrl(refused.server.url);refused.result=HttpDownloader::UNAUTHORIZED;
+  OpdsEntry other=book;
+  if(failure==0)HttpDownloader::unauthorizedStatus=403;
+  if(failure==1)HttpDownloader::redirected=true;
+  if(failure==2)other.href="https://cdn.test/book.epub";
+  refused.downloadBook(other);assert(refused.downloads==1&&refused.opdsClient.authCalls==0&&refused.persists==0);
+ }
+ reset();OpdsBookBrowserActivity art;art.opdsTransport.setServerUrl(art.server.url);HttpDownloader::coverFailures=1;
+ art.loadDetailCover("https://catalog.test/feed","https://catalog.test/cover.jpg");
+ assert(HttpDownloader::coverDownloads==2&&art.opdsClient.authCalls==1&&art.persists==1);
+ reset();LCP_DEVICE.enrolled=true;OpdsBookBrowserActivity license;license.opdsTransport.setServerUrl(license.server.url);HttpDownloader::getFailures=1;
+ license.downloadLcpBook(book);assert(HttpDownloader::gets==2&&license.opdsClient.authCalls==1&&license.persists==1);
+ puts("OPDS challenge/origin, single auth retry, dead token persistence, license/cover and acquisition safety passed");
 }
 '''
 
@@ -249,6 +298,7 @@ class OpdsSafetyTest(unittest.TestCase):
             "struct Cache {void releaseSdFontCaches(){}};struct Renderer {Cache cache;Cache* getFontCacheManager(){return &cache;}} renderer;")
         helpers=source[source.index("// License text and the unlock JSON"):source.index("// Accept-Language")]
         methods="\n".join(method(source,sig) for sig in [
+            "bool OpdsBookBrowserActivity::refreshDownloadAuth(",
             "bool OpdsBookBrowserActivity::verifyAndRegisterEpub(",
             "void OpdsBookBrowserActivity::downloadBook(",
             "void OpdsBookBrowserActivity::downloadLcpBook(",

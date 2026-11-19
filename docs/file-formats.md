@@ -103,6 +103,19 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
+### Versions 90 / 91
+
+Versions 90 (Latin) / 91 (CJK) preserve the fork's binary structures and rebuild
+completed and partial sections for deferred runtime TrueType advance rounding,
+RTL bracket mirroring and headings without hyphenation. Non-INX reader margins
+follow the reviewed upstream footer; INX retains its existing geometry.
+Book metadata, saved progress, bookmarks and clipping text are kept. First open
+may paginate again. Partial sentinels are 192/191, derived from
+`0xFE - (completeVersion - 28)`; old partials are rejected too.
+
+The clipping layout-signature version is 3, so geometry from earlier pagination
+is not reused as a selection range. Historical visual baselines remain unchanged.
+
 ### Versions 88 / 89
 
 Invalidate completed and partial section caches for font-size-based line spacing,
@@ -982,6 +995,12 @@ build-assigned discovery counter — breaks ties and carries books whose
 filesystem reports no time. Fold version 3 introduced the timestamp key; a
 fold bump rebuilds ranks while preserving `firstSeen`.
 Fold version 4 preserves leading articles in title sort and search keys.
+Fold version 5 uses the shared Hebrew/Arabic mark helpers and additionally drops
+U+05C8 and U+05C9, matching the reviewed upstream table. Library folding still
+drops the existing Arabic mark ranges, including shaddah; dictionary lookup
+keeps its narrower normalization. An older fold version rebuilds search/sort
+keys and re-reads book metadata when enabled, while preserving `firstSeen` and
+the previous live index if rebuilding fails. The binary format remains version 2.
 
 Sections are 512-byte aligned so each starts on an SD block boundary.
 

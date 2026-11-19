@@ -43,7 +43,7 @@ The Dictionary setting only appears when at least one usable dictionary folder e
 Two ways to start a lookup while reading:
 
 - Open the reader menu (**Confirm**) and choose **Look Up**.
-- Or set **Settings → Controls → Long-press Menu** to "Dictionary", then hold **Confirm** (~0.4s) on the reading page.
+- Or set **Settings → Controls → Front buttons → Menu long press** to "Dictionary", then hold **Confirm** (~0.4s) on the reading page. INX keeps this setting on its existing flat **Controls** page.
 
 ### Selecting Text
 
@@ -63,20 +63,26 @@ On the very first lookup with a dictionary (and again if the dictionary file cha
 
 ### How Lookup Works
 
-1. **Direct match** — the word or phrase is searched as-is (case-insensitive) in the dictionary index. Leading and trailing punctuation and whitespace are stripped automatically. Multi-word phrases match dictionary entries containing spaces (such as idioms, phrasal verbs, or compound terms). An index may list the same headword more than once (one entry per part of speech, for example); every entry it lists is shown, each labelled with its headword.
+1. **Direct match** — the word or phrase is searched case-insensitively in the dictionary index. Leading and trailing punctuation and whitespace are stripped automatically. Hebrew niqqud and cantillation marks are removed from the search term so pointed text can match unpointed headwords. Basic Arabic vowel marks (U+064B–U+0650, U+0652) and superscript alef (U+0670) are also removed; shaddah, hamza, and maddah remain significant. Multi-word phrases match dictionary entries containing spaces (such as idioms, phrasal verbs, or compound terms). An index may list the same headword more than once (one entry per part of speech, for example); every entry it lists is shown, each labelled with its headword.
 2. **Synonyms** — on a miss, if the dictionary ships a `.syn` file, alternate spellings and irregular forms recorded there are resolved to their headword (e.g. `oxen` → `ox`, `colour` → `color`). All distinct definition ranges a synonym points at are collected. If a `.syn` file exists but its `.sidx` sidecar could not be built or read (for example, because of transient low memory), direct matches remain usable, but a lookup that needs synonyms reports an error rather than an incomplete result or a false miss. Indexing is retried the next time the dictionary is opened.
 3. **Stemming** — still no match: common English word forms are retried automatically: possessives and plurals (`dogs` → `dog`, `stories` → `story`) and verb endings (`walked` → `walk`, `running` → `run`, `making` → `make`).
 4. **Not found** — a short popup appears. Touchscreen devices return to reading; buttons-only devices return to word selection.
+
+## Vocabulary History
+
+Enable **Settings → Reader → Save Vocabulary Lookups** to record successful lookups; this setting is off by default. Successful lookups started from a book page are appended to `/Vocabulary.txt` at the root of the SD card. This is separate from `My Clippings.txt`; looking up a word does not create a highlight. Failed lookups are not recorded, and an SD-card write failure does not interrupt the dictionary.
+
+The file uses UTF-8 **JSON Lines**: one JSON object per line, versioned with `"v":1`. Each record has a random `id`, `word` (selected text), `headword` (dictionary match), `definition` (plain text), and `timestamp` (Unix seconds, or `null` when the clock is unavailable). It also includes `title`, `author`, `series`, `series_index`, `chapter`, `page` (1-based chapter page), `spine` (0-based EPUB spine index), and `start_offset` (EPUB source offset, or `null` when unavailable). Missing series information is represented by an empty name and a `null` index. Definitions are limited to 2 KiB, looked-up words and matched headwords to 160 UTF-8 bytes each, and book fields to bounded lengths. The `definition_truncated` boolean indicates whether the definition (but not the word or headword) was shortened; when possible the saved definition ends at a complete line. HTML dictionary definitions are converted to plain text.
+
+Repeated lookups are recorded separately. Positions reflect the reader layout at lookup time and may change when the book is reflowed. The `chapter` title is resolved from the selected word's rendered page, not its exact offset: if two TOC chapter boundaries share a page, the title may refer to the later chapter rather than the one containing the word. Successful forward lookups inside a definition inherit the original book position and are recorded too; Back, restored definitions, and failed lookups add no record. The file has no automatic rotation and grows while recording stays enabled. It is not uploaded automatically.
+
+An existing file must have the recognizable version-1 record prefix, 32-hex-digit ID, and timestamp field. Unknown files or unrecognized/oversize tails are left untouched and recording fails without interrupting lookup. Complete records missing their final newline are preserved; a recognizable incomplete last record can be removed before appending. Very short incomplete tails are refused. HTML export checks total and contiguous temporary-memory headroom first; insufficient memory skips recording.
 
 ## The Definition Screen
 
 When a word is found, the definition screen shows the matched headword at the top and the definition text below, with a page counter for long definitions. A word that maps to several definitions shows the complete group one after another, each labelled with its headword. Repeated references to the same data offset and size are shown only once. A single direct definition retains its original presentation. The complete group, including labels and separators, must fit the 64 KiB definition limit and the available memory. If it cannot fit, or any definition cannot be read or decompressed, lookup reports an explicit error; it never presents a truncated definition or a successful prefix of the group.
 
 HTML dictionaries (`sametypesequence=h`) and XDXF dictionaries (`sametypesequence=x`) use the EPUB text-layout engine for supported formatting such as headings, bold, italics, lists, and line breaks. Unrecognized tags keep their text without special formatting. Images and CSS styling are ignored. A complete definition that fits the lookup budget but cannot be parsed or laid out within the styled-rendering budget falls back to plain text. Exceeding the 64 KiB lookup limit is an error, not permission to truncate the result.
-
-A readable `.ifo` file with a missing or empty `sametypesequence` enables the type stored in each entry field. HTML (`h`) and XDXF (`x`) fields use the same formatting support. Text fields are shown as text; binary fields, such as images and sounds, are skipped. Missing, empty, or unreadable `.ifo` files retain plain-text handling.
-
-Inline entries with only empty or binary fields are skipped. If all matching entries are empty, the lookup reports no match.
 
 Definitions are drawn in your reading font. Dictionaries may use IPA symbols (e.g. `ˈ ː ɹ ɪ ʊ`…) as pronunciation guide, which built-in reader fonts do not include, so they are shown as `�`. To see them, install an [SD card font](./sd-card-fonts.md) that covers IPA and select it as the reading font.
 

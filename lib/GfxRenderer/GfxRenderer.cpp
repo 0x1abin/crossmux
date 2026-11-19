@@ -561,18 +561,19 @@ static uint8_t get2BitCoverage(const uint8_t* bitmap, const int pixelPosition, c
 }
 
 // 把 4 位覆盖度写进 16 级灰度缓冲。drawGrayscale16Pixel() 的 gray 是 0 = 黑、255 = 白，
-// 而覆盖度是 0 = 全透明、15 = 满墨，所以要取反。
+// 而覆盖度是 0 = 全透明、15 = 满墨；黑字取反，白字直接映射。
 //
 // 覆盖度 0 必须**跳过**而不是画成白：那些像素不属于字形，画上去会把底图涂掉 —— 16 级
 // 缓冲是整帧一次推出去的，不像 LSB/MSB 平面那样只表达"这个平面要不要点亮"。
 // / Write 4-bit coverage into the 16-level buffer. drawGrayscale16Pixel() takes 0 = black
-// and 255 = white while coverage runs 0 = transparent to 15 = full ink, hence the
-// inversion. Coverage 0 must be SKIPPED rather than painted white: those pixels are not
+// and 255 = white while coverage runs 0 = transparent to 15 = full ink. Invert for
+// black ink; preserve coverage for white. Coverage 0 must be SKIPPED: those pixels are not
 // part of the glyph, and the 16-level buffer is pushed as a whole frame, unlike the
 // LSB/MSB planes, where a zero bit only means "not this plane".
-static void draw4BitGlyphPixel(const GfxRenderer& renderer, const int x, const int y, const uint8_t coverage) {
+static void draw4BitGlyphPixel(const GfxRenderer& renderer, const int x, const int y, const uint8_t coverage,
+                               const bool pixelState) {
   if (coverage == 0) return;
-  const uint8_t gray = static_cast<uint8_t>((15u - coverage) * 17u);
+  const uint8_t gray = static_cast<uint8_t>((pixelState ? 15u - coverage : coverage) * 17u);
   renderer.drawGrayscale16Pixel(x, y, gray);
 }
 
@@ -735,8 +736,8 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
       innerBase = cursorX + left;  // screenX = innerBase + glyphX
     }
 
-    if (is4Bit && renderer.isGrayscale16Active() && pixelState && syntheticBoldPixels == 0) {
-      // Native coverage is used only for unmodified black glyphs.
+    if (is4Bit && renderer.isGrayscale16Active() && syntheticBoldPixels == 0) {
+      // Native coverage preserves the requested ink for unmodified glyphs.
       for (int glyphY = 0; glyphY < height; glyphY++) {
         const int outerCoord = outerBase + glyphY;
         for (int glyphX = 0; glyphX < width; glyphX++) {
@@ -748,7 +749,7 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
             screenX = innerBase + glyphX;
             screenY = outerCoord;
           }
-          draw4BitGlyphPixel(renderer, screenX, screenY, get4BitCoverage(bitmap, glyphY * width + glyphX));
+          draw4BitGlyphPixel(renderer, screenX, screenY, get4BitCoverage(bitmap, glyphY * width + glyphX), pixelState);
         }
       }
     } else if (is2Bit || is4Bit) {
@@ -1312,7 +1313,9 @@ void GfxRenderer::drawPixelDither<Color::DarkGray>(const int x, const int y) con
   drawPixel(x, y, (x + y) % 2 == 0);  // TODO: maybe find a better pattern?
 }
 
-void GfxRenderer::fillRectDither(const int x, const int y, const int width, const int height, Color color) const {
+void GfxRenderer::fillRectDither(const int x, const int y, const int width, const int height, Color color,
+                                 const DitherMode mode) const {
+  if (mode == DitherMode::PreserveInk && color == Color::White) return;
   switch (color) {
     case Color::Clear:
       break;
@@ -1323,16 +1326,17 @@ void GfxRenderer::fillRectDither(const int x, const int y, const int width, cons
       fillRectImpl<Color::White>(x, y, width, height);
       break;
     case Color::LightGray:
-      fillRectImpl<Color::LightGray>(x, y, width, height);
+      fillRectImpl<Color::LightGray>(x, y, width, height, mode);
       break;
     case Color::DarkGray:
-      fillRectImpl<Color::DarkGray>(x, y, width, height);
+      fillRectImpl<Color::DarkGray>(x, y, width, height, mode);
       break;
   }
 }
 
 template <Color C>
-void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const int height) const {
+void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const int height,
+                               const DitherMode mode) const {
   if constexpr (C == Color::Clear) return;
   if (width <= 0 || height <= 0) return;
   if (fontCacheManager_ && fontCacheManager_->isScanning()) return;
@@ -1365,6 +1369,13 @@ void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const 
     constexpr uint8_t gray = C == Color::Black ? 0 : C == Color::LightGray ? 191 : C == Color::DarkGray ? 128 : 255;
     for (int py = ly0; py < ly1; ++py) {
       for (int px = lx0; px < lx1; ++px) {
+        if (mode == DitherMode::PreserveInk) {
+          int nativeX, nativeY;
+          rotateCoordinates(orientation, px, py, &nativeX, &nativeY, panelWidth, panelHeight);
+          const size_t index = static_cast<size_t>(nativeY) * (panelWidth / 2) + nativeX / 2;
+          const uint8_t current = (grayscale16Buffer[index] >> ((nativeX & 1) * 4)) & 0x0F;
+          if (current <= (static_cast<unsigned>(gray) + 8) / 17) continue;
+        }
         drawGrayscale16Pixel(px, py, gray);
       }
     }
@@ -1501,11 +1512,21 @@ void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const 
       const uint8_t blackMask = blackMasks[py & 1];
       const uint8_t whiteMask = static_cast<uint8_t>(~blackMask);
 
-      // Dither writes BOTH inks (the slow path called drawPixel for every
-      // pixel — setting or clearing — so we must do the same). Inside the
-      // rect mask: write whiteMask (1s where white, 0s where black). Outside
-      // the rect mask: leave the framebuffer untouched.
       uint8_t* row = target + static_cast<int32_t>(py - originY) * panelStride;
+      switch (mode) {
+        case DitherMode::PreserveInk:
+          for (int byte = byteStart; byte <= byteEnd; ++byte) {
+            uint8_t mask = blackMask;
+            if (byte == byteStart) mask &= headMask;
+            if (byte == byteEnd) mask &= tailMask;
+            row[byte] &= static_cast<uint8_t>(~mask);
+          }
+          continue;
+        case DitherMode::Replace:
+          break;
+      }
+
+      // Replace writes both inks inside the rectangle and leaves other pixels untouched.
       if (byteStart == byteEnd) {
         const uint8_t rectMask = headMask & tailMask;
         row[byteStart] = static_cast<uint8_t>((row[byteStart] & ~rectMask) | (rectMask & whiteMask));
@@ -1521,10 +1542,10 @@ void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const 
   }
 }
 
-template void GfxRenderer::fillRectImpl<Color::Black>(int, int, int, int) const;
-template void GfxRenderer::fillRectImpl<Color::White>(int, int, int, int) const;
-template void GfxRenderer::fillRectImpl<Color::LightGray>(int, int, int, int) const;
-template void GfxRenderer::fillRectImpl<Color::DarkGray>(int, int, int, int) const;
+template void GfxRenderer::fillRectImpl<Color::Black>(int, int, int, int, DitherMode) const;
+template void GfxRenderer::fillRectImpl<Color::White>(int, int, int, int, DitherMode) const;
+template void GfxRenderer::fillRectImpl<Color::LightGray>(int, int, int, int, DitherMode) const;
+template void GfxRenderer::fillRectImpl<Color::DarkGray>(int, int, int, int, DitherMode) const;
 
 void GfxRenderer::maskRoundedRectOutsideCorners(const int x, const int y, const int width, const int height,
                                                 const int radius, const Color color) const {

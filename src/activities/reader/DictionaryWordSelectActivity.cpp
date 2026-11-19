@@ -65,9 +65,13 @@ void DictionaryWordSelectActivity::performLookup() {
       popup = Popup::None;
       page.reset();
     }
+    if (SETTINGS.vocabularyHistoryEnabled &&
+        !VocabularyStore::append(vocabulary, lookupText, headword, definition, dict.definitionsAreHtml())) {
+      LOG_ERR("VOCAB", "Could not save successful dictionary lookup");
+    }
     auto activity = makeUniqueNoThrow<DictionaryDefinitionActivity>(renderer, mappedInput, std::move(headword),
                                                                     std::move(definition), dict.definitionsAreHtml());
-    if (!activity || !activity->enableLookup(dict, std::move(lookupText))) {
+    if (!activity || !activity->enableLookup(dict, std::move(lookupText), &vocabulary)) {
       LOG_ERR("DICT", "OOM: definition activity");
       popup = Popup::Error;
       popupMsg = StrId::STR_DICT_LOW_MEMORY;
