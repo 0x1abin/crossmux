@@ -1,37 +1,56 @@
 """Offline preset/config checks; --assets also checks real files and the reader."""
-from pathlib import Path
+
 import argparse
 import ast
 import hashlib
 import json
-import re
 import struct
 import subprocess
 import tempfile
+import unittest
 import zlib
-ROOT=Path(__file__).resolve().parents[2]
-parser=argparse.ArgumentParser();parser.add_argument("--assets",type=Path);args=parser.parse_args()
-source=(ROOT/"lib/EpdFont/scripts/fontconvert_sdcard.py").read_text()
-tree=ast.parse(source)
-presets=next(ast.literal_eval(n.value) for n in tree.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=="INTERVAL_PRESETS" for t in n.targets))
-assert (0x0300,0x036f) in presets["latin-ext"]
-original=subprocess.check_output(["git","show","HEAD:lib/EpdFont/scripts/fontconvert_sdcard.py"],cwd=ROOT,text=True)
-old=next(ast.literal_eval(n.value) for n in ast.parse(original).body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=="INTERVAL_PRESETS" for t in n.targets))
-expected=dict(old);expected["latin-ext"]=[*old["latin-ext"]];expected["latin-ext"].insert(4,(0x0300,0x036f));assert presets==expected
-config=(ROOT/"lib/EpdFont/scripts/sd-fonts.yaml").read_text()
-family=config[config.index("  - name: NotoSansCJKJP"):]
-assert "sizes: [8, 10, 12, 14, 16, 18]" in family and "scripts: [cjk]" in family
-pin="165c01b46ea533872e002e0785ff17e44f6d97d8"
-for style in ["Regular","Bold"]:assert f"{pin}/Sans/OTF/Japanese/NotoSansCJKjp-{style}.otf" in family
-license=(ROOT/"licenses/fonts.txt").read_text();assert "NotoSansCJKJP" in license and pin+"/LICENSE" in license
-assert "combining diacritical marks" in (ROOT/"docs/sd-card-fonts.md").read_text()
-if args.assets:
-    manifest=json.loads((args.assets/"fonts.json").read_text());families=manifest["families"];assert len(families)==1 and families[0]["name"]=="NotoSansCJKJP"
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+class SdFontUpstreamPresetsTest(unittest.TestCase):
+    def test_latin_ext_includes_combining_marks(self):
+        source = (ROOT / "lib/EpdFont/scripts/fontconvert_sdcard.py").read_text()
+        presets = next(
+            ast.literal_eval(node.value)
+            for node in ast.parse(source).body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "INTERVAL_PRESETS" for target in node.targets)
+        )
+        self.assertEqual(presets["latin-ext"], [
+            (0x0020, 0x007E), (0x0080, 0x00FF), (0x0100, 0x024F),
+            (0x02B0, 0x02FF), (0x0300, 0x036F), (0x1E00, 0x1EFF),
+            (0x2000, 0x206F), (0x20A0, 0x20CF), (0x2100, 0x214F),
+            (0x2212, 0x2212), (0xFB00, 0xFB06),
+        ])
+        self.assertIn("combining diacritical marks", (ROOT / "docs/sd-card-fonts.md").read_text())
+
+    def test_japanese_font_config_and_license(self):
+        config = (ROOT / "lib/EpdFont/scripts/sd-fonts.yaml").read_text()
+        family = config.split("  - name: NotoSansCJKJP", 1)[1].split("\n  - name:", 1)[0]
+        self.assertIn("sizes: [8, 10, 12, 14, 16, 18]", family)
+        self.assertIn("scripts: [cjk]", family)
+        pin = "165c01b46ea533872e002e0785ff17e44f6d97d8"
+        for style in ("Regular", "Bold"):
+            self.assertIn(f"{pin}/Sans/OTF/Japanese/NotoSansCJKjp-{style}.otf", family)
+        license_text = (ROOT / "licenses/fonts.txt").read_text()
+        self.assertIn("NotoSansCJKJP", license_text)
+        self.assertIn(f"{pin}/LICENSE", license_text)
+
+
+def validate_assets(assets: Path) -> None:
+    manifest=json.loads((assets/"fonts.json").read_text());families=manifest["families"];assert len(families)==1 and families[0]["name"]=="NotoSansCJKJP"
     family=families[0];assert family["styles"]==["regular","bold"] and family["scripts"]==["cjk"]
     sizes=set();records={}
     toc="<B3xIIBhhHHBBBI4x"
     for file in family["files"]:
-        p=args.assets/"NotoSansCJKJP"/file["name"];data=p.read_bytes();sizes.add(int(p.stem.rsplit("_",1)[1]));assert len(data)==file["size"] and zlib.crc32(data)&0xffffffff==file["crc32"]
+        p=assets/"NotoSansCJKJP"/file["name"];data=p.read_bytes();sizes.add(int(p.stem.rsplit("_",1)[1]));assert len(data)==file["size"] and zlib.crc32(data)&0xffffffff==file["crc32"]
         magic,version,flags,count=struct.unpack_from("<8sHHB",data);assert magic==b"CPFONT\x00\x00" and version==4 and count==2
         styles=[]
         for i in range(count):
@@ -42,7 +61,7 @@ if args.assets:
             styles.append({"style":style,"intervals":intervals,"glyphs":glyphs})
         records[file["name"]]={"sha256":hashlib.sha256(data).hexdigest(),"bytes":len(data),"styles":styles}
     assert sizes=={8,10,12,14,16,18}
-    (args.assets/"validated-artifacts.json").write_text(json.dumps(records,indent=2)+"\n")
+    (assets/"validated-artifacts.json").write_text(json.dumps(records,indent=2)+"\n")
     probe=r"""
 #include <HalStorage.h>
 #include <SdCardFont.h>
@@ -77,6 +96,14 @@ int main(int argc,char**argv){
         subprocess.run(["cc","-std=c11","-c",str(ROOT/"lib/MiniBidi/minibidi.c"),"-o",str(bidi)],check=True)
         for mode in [[],["-DBOARD_HAS_PSRAM=1","-DSIMULATOR=1"]]:
             subprocess.run(["c++","-std=c++20","-fno-exceptions","-DCROSSPOINT_EMULATED=1",*mode,*("-I"+str(p) for p in inc),str(cpp),*(str(p) for p in sources),str(bidi),"-o",str(binary)],check=True)
-            for file in family["files"]:subprocess.run([str(binary),str(args.assets/"NotoSansCJKJP"/file["name"])],check=True)
+            for file in family["files"]:subprocess.run([str(binary),str(assets/"NotoSansCJKJP"/file["name"])],check=True)
     print("Six actual v4 assets, CRC/size/interval/glyph tables and C3/S3 reader load/prewarm/advances pass")
-print("Pinned JP two-style/six-size config, license, latin-ext increment and documentation pass")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--assets", type=Path)
+    args = parser.parse_args()
+    if args.assets:
+        validate_assets(args.assets)
+    unittest.main(argv=[__file__])

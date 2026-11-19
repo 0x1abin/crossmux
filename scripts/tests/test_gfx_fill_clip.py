@@ -22,6 +22,7 @@ enum class Color { Clear, Black, White, LightGray, DarkGray };
 struct FontCacheManager { bool isScanning() const { return false; } };
 struct GfxRenderer {
   enum Orientation { Portrait, LandscapeClockwise, PortraitInverted, LandscapeCounterClockwise };
+  enum class DitherMode { Replace, PreserveInk };
   Orientation orientation = Portrait;
   uint16_t panelWidth = 16, panelHeight = 24, panelWidthBytes = 2;
   std::array<uint8_t, 48> bytes;
@@ -40,7 +41,7 @@ struct GfxRenderer {
   // and the expectations below still describe the byte-level fill.
   const uint8_t* grayscale16Buffer = nullptr;
   void drawGrayscale16Pixel(int, int, uint8_t) const { assert(false); }
-  template<Color C> void fillRectImpl(int, int, int, int) const;
+  template<Color C> void fillRectImpl(int, int, int, int, DitherMode = DitherMode::Replace) const;
 };
 ''' + rotate + "\ntemplate<Color C>\n" + fill + r'''
 struct Rect { int x, y, w, h; };
