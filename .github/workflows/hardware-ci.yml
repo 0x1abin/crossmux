@@ -9,6 +9,11 @@ on:
       - .github/workflows/nightly.yml
       - bin/ci-check
       - platformio.ini
+      - scripts/configure_s31_c.py
+      - scripts/patch_nimble_s31.py
+      - scripts/trim_tinyusb.py
+      - src/platform/S31NimbleMemory.cpp
+      - scripts/tests/test_metalio_eink4_plus.py
       - partitions.csv
       - freeink-sdk
       - lib/hal/**
@@ -49,6 +54,11 @@ on:
       - .github/workflows/nightly.yml
       - bin/ci-check
       - platformio.ini
+      - scripts/configure_s31_c.py
+      - scripts/patch_nimble_s31.py
+      - scripts/trim_tinyusb.py
+      - src/platform/S31NimbleMemory.cpp
+      - scripts/tests/test_metalio_eink4_plus.py
       - partitions.csv
       - freeink-sdk
       - lib/hal/**
@@ -99,6 +109,34 @@ jobs:
     uses: ./.github/workflows/select-build-runner.yml
     secrets:
       runner_status_token: ${{ secrets.H2O_RUNNER_TOKEN }}
+
+  build_s31:
+    name: Build Metalio E-Ink4-Plus
+    needs: select_runner
+    runs-on: ${{ fromJSON(needs.select_runner.outputs['runs-on']) }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: latest
+          enable-cache: false
+      - name: Install PlatformIO Core
+        run: uv pip install --system pioarduino==6.2.0
+      - name: Isolate the S31 toolchain
+        run: |
+          echo "PLATFORMIO_CORE_DIR=$RUNNER_TEMP/.platformio-s31-$GITHUB_RUN_ID-$GITHUB_JOB" >> "$GITHUB_ENV"
+          echo "PLATFORMIO_BUILD_DIR=$GITHUB_WORKSPACE/.pio/build-s31" >> "$GITHUB_ENV"
+          echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Build development firmware
+        run: pio run -e metalio_eink4_plus
+      - name: Check Plus display and input contracts
+        run: |
+          python3 -m unittest discover -s scripts/tests -p test_metalio_eink4_plus.py
 
   build:
     name: Build simulators and hardware

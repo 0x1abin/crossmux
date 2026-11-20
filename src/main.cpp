@@ -715,7 +715,7 @@ bool setupDisplayAndFonts(bool seamless = false, bool logSdFontLoadHeap = false)
   renderer.setFallbackFont(UI_12_FONT_ID, CJK_UI_12_FONT_ID);
   renderer.setFallbackFont(NOTOSANS_18_FONT_ID, CJK_UI_12_FONT_ID);
   renderer.insertFont(BaseTheme::STATUS_NUMERIC_FONT_ID, smallFontFamily);
-#if FREEINK_DEVICE_READPICO
+#if FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS
   renderer.insertFont(READER_STATUS_FONT_ID, smallFontFamily);
   renderer.insertFont(READER_ESTIMATE_FONT_ID, ui10FontFamily);
   renderer.setFallbackFont(READER_STATUS_FONT_ID, CJK_UI_8_FONT_ID);
@@ -911,13 +911,25 @@ void setup() {
     WiFi.onEvent(applyTxCap, ARDUINO_EVENT_WIFI_AP_START);
   }
 
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  WiFi.onEvent(
+      [](arduino_event_id_t, arduino_event_info_t) {
+        const auto ps = esp_wifi_set_ps(WIFI_PS_NONE);
+        if (ps != ESP_OK) LOG_ERR("WIFI", "Disabling S31 power save failed: %d", ps);
+        const auto proto =
+            esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+        if (proto != ESP_OK) LOG_ERR("WIFI", "Limiting S31 station to 802.11b/g/n failed: %d", proto);
+      },
+      ARDUINO_EVENT_WIFI_STA_START);
+#endif
+
   const auto wakeupReason = gpio.getWakeupReason();
   // Sample the wake hold now — a click wake is released within milliseconds of
   // boot — but defer the sleep-or-boot decision until SETTINGS is loaded below:
   // click-to-wake is a setting, and an X4 battery power-off cuts all power, so
   // only SD state survives to the next boot.
   const bool wakeHoldVerified = wakeupReason != HalGPIO::WakeupReason::PowerButton || BoardConfig::isMetalioEInk4() ||
-                                gpio.verifyPowerButtonWakeup();
+                                BoardConfig::isMetalioEInk4Plus() || gpio.verifyPowerButtonWakeup();
 
   // IMU bring-up on every target. Read Pico's SC7A20H is an accelerometer with no
   // gyroscope, so HalTiltSensor differentiates the gravity component for the tilt
@@ -1046,7 +1058,7 @@ void setup() {
       LOG_DBG("MAIN", "Wakeup reason: After USB Power");
 #if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_X4CLASSIC || FREEINK_DEVICE_PAPERMONO || FREEINK_DEVICE_EEGO_A4 || \
     FREEINK_DEVICE_WAVESHARE_EPAPER_397 || FREEINK_DEVICE_METALIO_EINK4 || FREEINK_DEVICE_READPICO ||         \
-    FREEINK_DEVICE_LILYGO || FREEINK_DEVICE_PICCO
+    FREEINK_DEVICE_LILYGO || FREEINK_DEVICE_PICCO || FREEINK_DEVICE_METALIO_EINK4_PLUS
       // X4 Pro must stay awake so USB Serial/JTAG remains available after leaving
       // USB Drive and reconnecting the cable. Paper Mono has no armable GPIO wake
       // (its button is behind the PMIC). Metalio also needs native USB available

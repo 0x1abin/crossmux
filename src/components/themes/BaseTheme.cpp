@@ -1194,7 +1194,7 @@ void BaseTheme::fillPopupProgress(const GfxRenderer& renderer, const Rect& layou
 void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage,
                               const int pageCount, std::string title, const int paddingBottom, const int textYOffset,
                               const bool fillMargin, const bool isPageBookmarked, const bool pageCountEstimated) {
-#if FREEINK_DEVICE_READPICO
+#if FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS
   constexpr int textFontId = READER_STATUS_FONT_ID;
   constexpr int estimateFontId = READER_ESTIMATE_FONT_ID;
 #else
@@ -1212,7 +1212,7 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   const auto screenHeight = renderer.getScreenHeight();
   auto textY = screenHeight - UITheme::getInstance().getStatusBarHeight() - orientedMarginBottom - paddingBottom;
   textY += UITheme::getStatusBarTextTopPadding(renderer);
-#if !FREEINK_DEVICE_READPICO
+#if !(FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS)
   textY -= 4;
 #endif
   const bool preserveInx = UITheme::getInstance().hasMainTabs();

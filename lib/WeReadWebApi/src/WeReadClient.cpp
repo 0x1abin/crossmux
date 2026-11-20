@@ -5,13 +5,13 @@
 #include <Arduino.h>
 #include <Epub.h>
 #include <HalClock.h>
+#include <HalSha256.h>
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
 #include <MD5Builder.h>
 #include <Memory.h>
 #include <PngToBmpConverter.h>
 #include <StreamingJsonParser.h>
-#include <mbedtls/sha256.h>
 #include <strings.h>
 
 #include <algorithm>
@@ -239,12 +239,8 @@ bool makeWebAppId(char* out, const size_t outSize) {
 bool sha256Hex(const char* value, char* out, const size_t outSize) {
   if (!value || !out || outSize < 65) return false;
   uint8_t digest[32];
-  mbedtls_sha256_context context;
-  mbedtls_sha256_init(&context);
-  const bool ok = mbedtls_sha256_starts(&context, 0) == 0 &&
-                  mbedtls_sha256_update(&context, reinterpret_cast<const uint8_t*>(value), strlen(value)) == 0 &&
-                  mbedtls_sha256_finish(&context, digest) == 0;
-  mbedtls_sha256_free(&context);
+  HalSha256 hash;
+  const bool ok = hash.update(reinterpret_cast<const uint8_t*>(value), strlen(value)) && hash.finish(digest);
   if (!ok) return false;
   for (size_t i = 0; i < sizeof(digest); ++i) snprintf(out + i * 2, outSize - i * 2, "%02x", digest[i]);
   out[64] = '\0';

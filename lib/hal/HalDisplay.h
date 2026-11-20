@@ -57,6 +57,9 @@ class HalDisplay {
 #if FREEINK_DEVICE_READPICO
   static constexpr uint16_t DISPLAY_WIDTH = BoardConfig::READ_PICO.displayWidth;
   static constexpr uint16_t DISPLAY_HEIGHT = BoardConfig::READ_PICO.displayHeight;
+#elif FREEINK_DEVICE_METALIO_EINK4_PLUS
+  static constexpr uint16_t DISPLAY_WIDTH = BoardConfig::METALIO_EINK4_PLUS.displayWidth;
+  static constexpr uint16_t DISPLAY_HEIGHT = BoardConfig::METALIO_EINK4_PLUS.displayHeight;
 #else
   static constexpr uint16_t DISPLAY_WIDTH = EInkDisplay::DISPLAY_WIDTH;
   static constexpr uint16_t DISPLAY_HEIGHT = EInkDisplay::DISPLAY_HEIGHT;

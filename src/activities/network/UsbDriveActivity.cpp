@@ -119,7 +119,12 @@ void UsbDriveActivity::render(RenderLock&&) {
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  const bool connected = !preparing && !startFailed && state == State::Connected;
+  renderer.displayBuffer(connected ? HalDisplay::FULL_REFRESH : HalDisplay::FAST_REFRESH);
+#else
   renderer.displayBuffer();
+#endif
 }
 
 void UsbDriveActivity::driveScreen(UiScreen& screen, void* user) {

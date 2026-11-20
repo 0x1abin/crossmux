@@ -195,6 +195,17 @@ int main() {
                     self.assertNotIn("configure_c3_ble_controller.py", scripts)
                     continue
                 hardware_environments.add(section.removeprefix("env:"))
+                if resolve(section, "board_build.mcu") == "esp32s31":
+                    self.assertIn("FREEINK_DEVICE_METALIO_EINK4_PLUS=1", flags)
+                    self.assertIn("FREEINK_CAP_BLE_HID_HOST=1", flags)
+                    self.assertIn("FREEINK_BLE_STACK_S31=1", flags)
+                    self.assertIn("FREEINK_CAP_USB_MSC=1", flags)
+                    self.assertIn("NimBLE-Arduino @ 2.5.1", libraries)
+                    self.assertIn("patch_nimble_s31.py", scripts)
+                    self.assertIn("trim_tinyusb.py", scripts)
+                    self.assertNotIn("configure_nimble_psram.py", scripts)
+                    self.assertNotIn("xTaskCreatePinnedToCore", flags)
+                    continue
                 if "FREEINK_DEVICE_EEGO_A4=1" in flags:
                     self.assertNotIn("FREEINK_CAP_BLE_HID_HOST=1", flags)
                     self.assertNotIn("NimBLE-Arduino", libraries)
@@ -226,7 +237,7 @@ int main() {
                     self.assertIn("CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY=y", resolve(section, "custom_sdkconfig"))
                     self.assertIn("CONFIG_BT_CONTROLLER_ONLY=y", resolve(section, "custom_sdkconfig"))
         self.assertEqual(hardware_environments, {
-            "default", "gh_release", "gh_release_rc", "x4c", "lilygo_t5s3", "picco",
+            "default", "gh_release", "gh_release_rc", "x4c", "lilygo_t5s3", "picco", "metalio_eink4_plus",
             *{
                 environment
                 for board in ("sticky", "x4pro", "papermono", "eego_a4", "murphy_m4",

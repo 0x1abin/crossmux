@@ -194,7 +194,7 @@ Rect UITheme::getContentArea(const GfxRenderer& renderer) {
 Rect UITheme::getScreenSafeArea(const GfxRenderer& renderer, bool hasFrontButtonHints, bool hasSideButtonHints) {
   auto orientation = renderer.getOrientation();
   Rect safeArea = getContentArea(renderer);
-#if !FREEINK_DEVICE_READPICO
+#if !(FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS)
   if (currentType == CrossPointSettings::UI_THEME::INX)
     safeArea = Rect{0, 0, renderer.getScreenWidth(), renderer.getScreenHeight()};
 #endif
@@ -278,7 +278,7 @@ int UITheme::getProgressBarHeight() {
 
 int UITheme::getStatusBarTextTopPadding(const GfxRenderer& renderer) {
   if (!UiHighDpiProfile::enabled) return 0;
-#if FREEINK_DEVICE_READPICO
+#if FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS
   constexpr int textFontId = READER_STATUS_FONT_ID;
 #else
   constexpr int textFontId = SMALL_FONT_ID;

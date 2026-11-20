@@ -7,7 +7,7 @@
 // a build that runs out of memory aborts the firmware (no exceptions). A radio refused for memory
 // holds nothing.
 inline bool chapterBuildMayRun(const bleturner::Status& radio, const bool retainExistingLink = false) {
-  return (retainExistingLink || !radio.running) && !radio.stopping && !radio.starting;
+  return (retainExistingLink || radio.buildFitsBeside || !radio.running) && !radio.stopping && !radio.starting;
 }
 
 // Asks `ready` until it says yes, sleeping stepMs between asks, and gives up once waitMs has

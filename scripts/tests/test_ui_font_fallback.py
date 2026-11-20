@@ -98,11 +98,12 @@ int main() {
     def test_high_dpi_reader_family_does_not_replace_ui(self):
         system = (ROOT / 'src/SdCardFontSystem.cpp').read_text()
         table = system[system.index('struct UiFontSize'):system.index('}  // namespace', system.index('struct UiFontSize'))]
-        run_cpp(r'''
+        program = (r'''
 #define ENABLE_CHINESE_VERSION 1
 #define CROSSMUX_UI_PROFILE_HIGH_DPI 1
 #define SIMULATOR 1
-#define FREEINK_DEVICE_READPICO 1
+#define BOARD_HAS_PSRAM 1
+namespace memory { bool psramHasHeadroom(int,int,int) { return true; } }
 #define LOG_DBG(...) ((void)0)
 #include <cassert>
 #include <cstdint>
@@ -146,10 +147,13 @@ int main() {
 }
 ''')
 
+        for device in ("READPICO", "METALIO_EINK4_PLUS"):
+            run_cpp(program, defines=(f"FREEINK_DEVICE_{device}=1",))
+
     def test_high_dpi_vector_ui_keeps_builtin_backup(self):
         system = (ROOT / 'src/SdCardFontSystem.cpp').read_text()
         table = system[system.index('struct UiFontSize'):system.index('}  // namespace', system.index('struct UiFontSize'))]
-        run_cpp(r'''
+        program = (r'''
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -206,7 +210,10 @@ int main() {
     assert(system.ttfUi_.capacity()>=5 && system.ttfUiIds_.capacity()>=5);
   }
 }
-''', defines=('CROSSMUX_UI_PROFILE_HIGH_DPI','FREEINK_DEVICE_READPICO=1'))
+''')
+
+        for device in ("READPICO", "METALIO_EINK4_PLUS"):
+            run_cpp(program, defines=("CROSSMUX_UI_PROFILE_HIGH_DPI", f"FREEINK_DEVICE_{device}=1"))
 
     def test_high_dpi_vector_unload_preserves_fixed_ui(self):
         system = (ROOT / 'src/SdCardFontSystem.cpp').read_text()
@@ -634,6 +641,7 @@ int main() {
         configurations = (
             ('readpico', ['CONFIG_IDF_TARGET_ESP32S3=1', 'BOARD_HAS_PSRAM', 'FREEINK_DEVICE_READPICO=1'], True),
             ('readpico_simulator', ['SIMULATOR', 'CROSSPOINT_EMULATED=1', 'FREEINK_DEVICE_READPICO=1'], True),
+            ('metalio_plus', ['CONFIG_IDF_TARGET_ESP32S31=1', 'BOARD_HAS_PSRAM', 'FREEINK_DEVICE_METALIO_EINK4_PLUS=1'], True),
             ('s3', ['CONFIG_IDF_TARGET_ESP32S3=1', 'BOARD_HAS_PSRAM'], True),
             ('c3', ['CONFIG_IDF_TARGET_ESP32C3=1'], False),
             ('s3_no_psram', ['CONFIG_IDF_TARGET_ESP32S3=1'], False),
@@ -648,7 +656,7 @@ int main() {
                 with self.subTest(target=name):
                     subprocess.run(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
                                     '-DENABLE_CHINESE_VERSION=1', f'-DEXPECT_ENABLED={int(enabled)}',
-                                    f'-DEXPECT_READPICO={int(name.startswith("readpico"))}',
+                                    f'-DEXPECT_READPICO={int(name.startswith("readpico") or name.startswith("metalio_plus"))}',
                                     *[f'-D{value}' for value in defines],
                                     '-I', str(ROOT / 'lib/Utf8'), '-I', str(ROOT / 'lib/EpdFont'),
                                     '-I', str(ROOT / 'lib/MiniBidi'), str(cpp),

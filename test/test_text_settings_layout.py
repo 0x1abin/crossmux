@@ -405,7 +405,7 @@ int main() {
   for (const auto& profile : {BoardConfig::XTEINK_X3, BoardConfig::XTEINK_X3_UC8279, BoardConfig::XTEINK_X4,
                               BoardConfig::XTEINK_X4_PRO, BoardConfig::XTEINK_X4_CLASSIC, BoardConfig::STICKY,
                               BoardConfig::PAPER_MONO, BoardConfig::METALIO_EINK4, BoardConfig::EEGO_A4,
-                              BoardConfig::PICCO})
+                              BoardConfig::PICCO, BoardConfig::READ_PICO, BoardConfig::METALIO_EINK4_PLUS})
     for (auto orientation : {GfxRenderer::Portrait, GfxRenderer::PortraitInverted,
                              GfxRenderer::LandscapeClockwise, GfxRenderer::LandscapeCounterClockwise})
       for (const auto& metrics : {LyraMetrics::values, RoundedRaffMetrics::values})

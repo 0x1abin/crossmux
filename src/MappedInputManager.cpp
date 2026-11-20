@@ -15,6 +15,14 @@
 
 namespace fui = freeink::ui;
 
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+void MappedInputManager::discardBufferedTouch() const {
+  gpio.discardBufferedTouch();
+  resetHomeButtonInput();
+  touchHeldOverrideValid = false;
+}
+#endif
+
 void MappedInputManager::update(const bool deferHomeButtonAction) const {
   remoteInput.reset();
   gpio.update();
@@ -27,11 +35,16 @@ void MappedInputManager::update(const bool deferHomeButtonAction) const {
   HalHaptics::feedback(SETTINGS.vibration != CrossPointSettings::VIBRATION_OFF, pagePressed, SETTINGS.hapticIntensity);
   homeAction = HomeButtonAction::Ignore;
   if (gpio.hasHomeKey()) {
-    homeAction = homeButtonInput.update(millis(), gpio.wasHomeKeyTapped(), gpio.wasHomeKeyLongPressed(),
-                                        wasSwipe() != SwipeDir::None, gpio.wasHomeKeyPressed(),
-                                        static_cast<HomeButtonAction>(SETTINGS.homeButtonTapAction),
-                                        static_cast<HomeButtonAction>(SETTINGS.homeButtonDoubleTapAction),
-                                        static_cast<HomeButtonAction>(SETTINGS.homeButtonLongPressAction));
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    const auto now = gpio.touchFrameTime();
+#else
+    const auto now = millis();
+#endif
+    homeAction =
+        homeButtonInput.update(now, gpio.wasHomeKeyTapped(), gpio.wasHomeKeyLongPressed(), wasSwipe() != SwipeDir::None,
+                               gpio.wasHomeKeyPressed(), static_cast<HomeButtonAction>(SETTINGS.homeButtonTapAction),
+                               static_cast<HomeButtonAction>(SETTINGS.homeButtonDoubleTapAction),
+                               static_cast<HomeButtonAction>(SETTINGS.homeButtonLongPressAction));
     if (gpio.wasHomeKeyLongPressed() && homeAction != HomeButtonAction::Ignore) {
       HalHaptics::longPress(SETTINGS.vibration != CrossPointSettings::VIBRATION_OFF, SETTINGS.hapticIntensity);
     } else if (homeAction != HomeButtonAction::Ignore) {

@@ -31,6 +31,14 @@ TEST(ChapterBuildGate, RefusedWhileTheRadioHoldsOrTakesTheHeap) {
   EXPECT_FALSE(chapterBuildMayRun(starting));
 }
 
+TEST(ChapterBuildGate, S31CanRetainARadioWhenTheBuildFits) {
+  auto up = radio();
+  up.running = up.connected = up.buildFitsBeside = true;
+  EXPECT_TRUE(chapterBuildMayRun(up));
+  up.stopping = true;
+  EXPECT_FALSE(chapterBuildMayRun(up));
+}
+
 namespace {
 // A clock that only moves when the wait sleeps.
 struct FakeClock {

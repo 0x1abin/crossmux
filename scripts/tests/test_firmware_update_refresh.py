@@ -326,7 +326,7 @@ struct { void restart() { flashOperation(); ++restarts; } } ESP;
 const char* tr(int id) { static char labels[64][32]; snprintf(labels[id],32,"label%d",id); return labels[id]; }
 struct Rect { int x,y,width,height; };
 struct Sample { size_t done,total; int expected; };
-constexpr int UI_10_FONT_ID=10, UI_12_FONT_ID=12, SMALL_FONT_ID=8;
+[[maybe_unused]] constexpr int UI_10_FONT_ID=10, UI_12_FONT_ID=12, SMALL_FONT_ID=8;
 struct EpdFontFamily { enum { REGULAR, BOLD }; };
 struct GfxRenderer {
   int clears=0, frames=0;
@@ -472,7 +472,7 @@ struct SdFirmwareUpdateActivity : Activity {
   void performUpdate();
   bool validateFirmware();
 };
-constexpr int ESP_OK=0, OTA_SIZE_UNKNOWN=-1, WIFI_PS_MIN_MODEM=0;
+[[maybe_unused]] constexpr int ESP_OK=0, OTA_SIZE_UNKNOWN=-1, WIFI_PS_MIN_MODEM=0;
 using esp_err_t=int;
 using esp_ota_handle_t=int;
 struct esp_partition_t { size_t size=1024*1024; const char* label="ota1"; int address=0x650000; };

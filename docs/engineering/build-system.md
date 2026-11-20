@@ -74,6 +74,7 @@ prebuilt `dio_opi` core continues to supply the TinyUSB CDC/MSC component graph.
   * `murphy_m4`: Murphy M4 ESP32-S3 experimental development build
   * `waveshare_epaper_397`: Waveshare ePaper 3.97 ESP32-S3 experimental development build
   * `metalio_eink4`: Metalio E-Ink 4 ESP32-S3 development build
+  * `metalio_eink4_plus`: ESP32-S31 development build; use `PLATFORMIO_CORE_DIR=/tmp/crossmux-s31-pio` and PlatformIO Core 6.2+
   * `readpico`: MindReset Read Pico ESP32-S3 development build
   * `lilygo_t5s3`: LilyGo T5 S3 4.7 PRO/Lite ESP32-S3 build-only development build
   * `picco`: BOOX Picco ESP32-S3 development build, stock partitions and app-only upload
