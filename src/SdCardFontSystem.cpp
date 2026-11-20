@@ -164,6 +164,7 @@ void SdCardFontSystem::begin(GfxRenderer& renderer) {
 }
 
 void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer, bool allowFlashCache) {
+  if (storageHandoff_.load(std::memory_order_acquire)) return;
   // If the web server (or another task) installed/deleted fonts, re-discover.
   // Track whether we just re-discovered so we can force a reload below even
   // when the wanted family/size still maps to the same point size — the file
@@ -262,7 +263,24 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer, bool allowFlashCache)
 
 void SdCardFontSystem::releaseLoadedFont(GfxRenderer& renderer) { unloadCpfonts(renderer); }
 
+void SdCardFontSystem::beginStorageHandoff(GfxRenderer& renderer) {
+  storageHandoff_.store(true, std::memory_order_release);
+  if (auto* cache = renderer.getFontCacheManager()) cache->releaseSdFontCaches();
+#if CROSSPOINT_VECTOR_FONTS
+  unloadTtf(renderer);
+#endif
+  unloadCpfonts(renderer);
+}
+
+void SdCardFontSystem::endStorageHandoff(GfxRenderer& renderer) {
+  if (!Storage.ready()) return;
+  registryDirty_.store(true, std::memory_order_release);
+  storageHandoff_.store(false, std::memory_order_release);
+  ensureLoaded(renderer);
+}
+
 bool SdCardFontSystem::adoptCompleteChineseNotoSans() {
+  if (storageHandoff_.load(std::memory_order_acquire)) return false;
 #ifdef ENABLE_CHINESE_VERSION
   if (SETTINGS.contentProfile != CrossPointSettings::ContentProfile::China || SETTINGS.sdFontFamilyName[0] != '\0' ||
       !registry_.findFamily(COMPLETE_CHINESE_NOTO_SANS_FAMILY))
@@ -414,6 +432,7 @@ int SdCardFontSystem::resolveVariant(const int fontId, const float scale) {
   if (const int builtin = builtinReaderFontVariant(fontId, scale); builtin != 0) {
     return renderer_->getFontMap().count(builtin) ? builtin : 0;
   }
+  if (storageHandoff_.load(std::memory_order_acquire)) return 0;
 #if CROSSPOINT_VECTOR_FONTS
   if (ttf_ && fontId == ttfFontId_) {
     // Vector faces render at any size.
@@ -453,6 +472,7 @@ int SdCardFontSystem::resolveVariant(const int fontId, const float scale) {
 }
 
 bool SdCardFontSystem::loadVariant(const int fontId) {
+  if (storageHandoff_.load(std::memory_order_acquire)) return false;
 #if CROSSPOINT_VECTOR_FONTS
   if (ttf_) {
     for (int pointSize = 6; pointSize <= 72; ++pointSize) {
