@@ -37,6 +37,7 @@ def metrics_code(ref=None):
     code = re.search(r'struct ThemeMetrics \{.*?\n};', base, re.S).group()
     code += (ROOT/'src/components/UiHighDpiProfile.h').read_text().replace('#pragma once', '')
     code += re.search(r'namespace UiHighDpiProfile \{.*?namespace UiHighDpiProfile', (ROOT/'src/components/themes/BaseTheme.h').read_text(), re.S).group() + '\n'
+    code += '#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI\nnamespace UiHighDpiProfile {bool active(){return true;}}\n#endif\n'
     for path, name in [('src/components/themes/BaseTheme.h','Base'),
                        ('src/components/themes/lyra/LyraTheme.h','Lyra'),
                        ('src/components/themes/lyra/Lyra3CoversTheme.h','Lyra3Covers'),

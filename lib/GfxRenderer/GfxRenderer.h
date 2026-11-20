@@ -40,6 +40,78 @@ class GfxRenderer {
   enum RenderMode { BW, GRAYSCALE_LSB, GRAYSCALE_MSB };
   enum class DitherMode { Replace, PreserveInk };
 
+  // Fixed 3:2 transform used by the proportional UI. Scale both rect edges so
+  // adjacent controls and their hit targets share the same rounded boundary.
+  static constexpr int scaledUiEdge(int value) { return (3 * value + (value < 0 ? -1 : 1)) / 2; }
+  static constexpr int scaledUiLength(int pixels) { return (2 * pixels + (pixels < 0 ? -1 : 1)) / 3; }
+  static constexpr int scaledUiHit(int pixel) { return 2 * pixel / 3; }
+
+  enum class PixelSpace { Native, Theme };
+
+  // Reader contents can use physical pixels while the other task builds UI
+  // geometry. The override only changes coordinates on the calling task.
+  class PixelScope {
+#if defined(CROSSMUX_UI_PROFILE_HIGH_DPI)
+    const GfxRenderer* previous_;
+#endif
+
+   public:
+    explicit PixelScope(const GfxRenderer& renderer, PixelSpace space = PixelSpace::Native) {
+#if defined(CROSSMUX_UI_PROFILE_HIGH_DPI)
+      previous_ = nativePixels_;
+      nativePixels_ = space == PixelSpace::Native ? &renderer : nullptr;
+#else
+      (void)renderer;
+      (void)space;
+#endif
+    }
+    ~PixelScope() {
+#if defined(CROSSMUX_UI_PROFILE_HIGH_DPI)
+      nativePixels_ = previous_;
+#endif
+    }
+    PixelScope(const PixelScope&) = delete;
+    PixelScope& operator=(const PixelScope&) = delete;
+  };
+
+  void setProportionalUi(bool scaled) {
+#if defined(CROSSMUX_UI_PROFILE_HIGH_DPI)
+    proportionalUi_.store(scaled, std::memory_order_relaxed);
+#else
+    (void)scaled;
+#endif
+  }
+  void setProportionalUiFonts(int compactFont, std::array<int, 3> largeFonts) {
+#if defined(CROSSMUX_UI_PROFILE_HIGH_DPI)
+    compactUiFont_ = compactFont;
+    largeUiFonts_ = largeFonts;
+#else
+    (void)compactFont;
+    (void)largeFonts;
+#endif
+  }
+  bool usesProportionalUi() const {
+#if defined(CROSSMUX_UI_PROFILE_HIGH_DPI)
+    return proportionalUi_.load(std::memory_order_relaxed);
+#else
+    return false;
+#endif
+  }
+  bool isScalingUi() const {
+#if defined(CROSSMUX_UI_PROFILE_HIGH_DPI)
+    return nativePixels_ != this && usesProportionalUi();
+#else
+    return false;
+#endif
+  }
+  int toNativeUiLength(int value) const { return usesProportionalUi() ? scaledUiEdge(value) : value; }
+  int bitmapUiWidth(const Bitmap& bitmap) const {
+    return isScalingUi() ? scaledUiLength(bitmap.getWidth()) : bitmap.getWidth();
+  }
+  int bitmapUiHeight(const Bitmap& bitmap) const {
+    return isScalingUi() ? scaledUiLength(bitmap.getHeight()) : bitmap.getHeight();
+  }
+
   struct TwoBitPixel {
     bool draw;
     bool state;
@@ -67,6 +139,24 @@ class GfxRenderer {
   };
 
  private:
+#if defined(CROSSMUX_UI_PROFILE_HIGH_DPI)
+  std::atomic<bool> proportionalUi_{false};
+  int compactUiFont_ = 0;
+  std::array<int, 3> largeUiFonts_{};
+  static thread_local const GfxRenderer* nativePixels_;
+#endif
+
+  int uiGlyphScale(int fontId) const;
+
+  static void scaleUiRect(int& x, int& y, int& w, int& h) {
+    const int right = scaledUiEdge(x + w);
+    const int bottom = scaledUiEdge(y + h);
+    x = scaledUiEdge(x);
+    y = scaledUiEdge(y);
+    w = right - x;
+    h = bottom - y;
+  }
+
   static constexpr size_t BW_BUFFER_CHUNK_SIZE = 8000;  // 8KB chunks to allow for non-contiguous memory
   static constexpr uint8_t MAX_SYNTHETIC_BOLD_PIXELS = 3;
 
@@ -348,17 +438,21 @@ class GfxRenderer {
   void clearClipRect() const { setClipRect(0, 0, 32767, 32767); }
 
   // RAII guard for setClipRect()/clearClipRect(). Restores the clip on scope
-  // exit (including early returns), so a forgotten clear can never silently
-  // clip a later frame or activity. Non-nesting: it clears on destruction
-  // rather than restoring a previous rect (sufficient for the flat use here).
+  // exit (including early returns). Keep the saved edges in panel pixels so
+  // restoring across a coordinate-space override cannot scale them twice.
   struct ClipScope {
     const GfxRenderer& renderer;
     const std::array<int, 4> previous;
     ClipScope(const GfxRenderer& r, const int x, const int y, const int width, const int height)
-        : renderer(r), previous(r.getClipRect()) {
+        : renderer(r), previous{r.clipLeft_, r.clipTop_, r.clipRight_, r.clipBottom_} {
       renderer.setClipRect(x, y, width, height);
     }
-    ~ClipScope() { renderer.setClipRect(previous[0], previous[1], previous[2], previous[3]); }
+    ~ClipScope() {
+      renderer.clipLeft_ = previous[0];
+      renderer.clipTop_ = previous[1];
+      renderer.clipRight_ = previous[2];
+      renderer.clipBottom_ = previous[3];
+    }
     ClipScope(const ClipScope&) = delete;
     ClipScope& operator=(const ClipScope&) = delete;
   };
@@ -366,9 +460,14 @@ class GfxRenderer {
   // Drawing
   // UI drawing clip in logical coordinates; independent of panel orientation.
   std::array<int, 4> getClipRect() const {
+    if (isScalingUi()) {
+      const int left = scaledUiLength(clipLeft_), top = scaledUiLength(clipTop_);
+      return {left, top, scaledUiLength(clipRight_) - left, scaledUiLength(clipBottom_) - top};
+    }
     return {clipLeft_, clipTop_, clipRight_ - clipLeft_, clipBottom_ - clipTop_};
   }
   void setClipRect(int x, int y, int width, int height) const {
+    if (isScalingUi()) scaleUiRect(x, y, width, height);
     clipLeft_ = x;
     clipTop_ = y;
     clipRight_ = x + width;
@@ -457,6 +556,9 @@ class GfxRenderer {
   int getTextAdvanceX(int fontId, const char* text, EpdFontFamily::Style style, int8_t tracking = 0,
                       BidiUtils::BidiBaseDir baseDir = BidiUtils::BidiBaseDir::AUTO,
                       TextMeasureMode mode = TextMeasureMode::Layout) const;
+  // [top, height] of ASCII ink relative to the line origin, in the active pixel space.
+  std::array<int, 2> getAsciiTextInkY(int fontId, const char* text,
+                                      EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
   int getFontAscenderSize(int fontId) const;
   int getLineHeight(int fontId) const;
   // Explicit line spacing scales font size; the one-argument form returns font metrics.

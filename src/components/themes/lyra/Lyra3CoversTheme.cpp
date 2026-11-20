@@ -57,7 +57,8 @@ void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
         if (coverPath.empty()) {
           hasCover = false;
         } else {
-          const std::string coverBmpPath = UITheme::getCoverThumbPath(coverPath, homeCoverThumbHeight(renderer));
+          const std::string coverBmpPath =
+              UITheme::getCoverThumbPath(coverPath, renderer.toNativeUiLength(homeCoverThumbHeight(renderer)));
 
           // First time: load cover from SD and render
           HalFile file;

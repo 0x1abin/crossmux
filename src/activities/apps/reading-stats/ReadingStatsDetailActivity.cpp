@@ -106,7 +106,7 @@ const ReadingBookStats* findBook(const std::string& bookPath) {
   return nullptr;
 }
 
-std::string resolveStoredCoverPath(const std::string& coverBmpPath) {
+std::string resolveStoredCoverPath(const GfxRenderer& renderer, const std::string& coverBmpPath) {
   if (coverBmpPath.empty()) {
     return "";
   }
@@ -114,7 +114,7 @@ std::string resolveStoredCoverPath(const std::string& coverBmpPath) {
   if (coverBmpPath.find("[HEIGHT]") != std::string::npos) {
     const int candidateHeights[] = {COVER_HEIGHT, 160, 240, 400};
     for (const int height : candidateHeights) {
-      const std::string resolved = UITheme::getCoverThumbPath(coverBmpPath, height);
+      const std::string resolved = UITheme::getCoverThumbPath(coverBmpPath, renderer.toNativeUiLength(height));
       if (Storage.exists(resolved.c_str())) {
         return resolved;
       }
@@ -125,13 +125,13 @@ std::string resolveStoredCoverPath(const std::string& coverBmpPath) {
   return Storage.exists(coverBmpPath.c_str()) ? coverBmpPath : "";
 }
 
-std::string ensureCoverPath(const ReadingBookStats& book) {
+std::string ensureCoverPath(const GfxRenderer& renderer, const ReadingBookStats& book) {
   const std::string cachedResolvedPath = getCachedResolvedCoverPath(book);
   if (!cachedResolvedPath.empty()) {
     return cachedResolvedPath;
   }
 
-  std::string resolved = resolveStoredCoverPath(book.coverBmpPath);
+  std::string resolved = resolveStoredCoverPath(renderer, book.coverBmpPath);
   if (!resolved.empty()) {
     rememberResolvedCoverPath(book, resolved);
     return resolved;
@@ -147,13 +147,13 @@ std::string ensureCoverPath(const ReadingBookStats& book) {
   return coverPath;
 }
 
-std::string findFastCoverPath(const ReadingBookStats& book) {
+std::string findFastCoverPath(const GfxRenderer& renderer, const ReadingBookStats& book) {
   const std::string cachedResolvedPath = getCachedResolvedCoverPath(book);
   if (!cachedResolvedPath.empty()) {
     return cachedResolvedPath;
   }
 
-  std::string resolved = resolveStoredCoverPath(book.coverBmpPath);
+  std::string resolved = resolveStoredCoverPath(renderer, book.coverBmpPath);
   if (!resolved.empty()) {
     rememberResolvedCoverPath(book, resolved);
     return resolved;
@@ -165,13 +165,13 @@ std::string findFastCoverPath(const ReadingBookStats& book) {
 
   if (FsHelpers::hasEpubExtension(book.path)) {
     Epub epub(book.path, "/.crosspoint");
-    resolved = resolveStoredCoverPath(epub.getCoverBmpPath());
+    resolved = resolveStoredCoverPath(renderer, epub.getCoverBmpPath());
   } else if (FsHelpers::hasXtcExtension(book.path)) {
     Xtc xtc(book.path, "/.crosspoint");
-    resolved = resolveStoredCoverPath(xtc.getCoverBmpPath());
+    resolved = resolveStoredCoverPath(renderer, xtc.getCoverBmpPath());
   } else if (FsHelpers::hasTxtExtension(book.path) || FsHelpers::hasMarkdownExtension(book.path)) {
     Txt txt(book.path, "/.crosspoint");
-    resolved = resolveStoredCoverPath(txt.getCoverBmpPath());
+    resolved = resolveStoredCoverPath(renderer, txt.getCoverBmpPath());
   }
 
   if (!resolved.empty()) {
@@ -362,7 +362,7 @@ void ReadingStatsDetailActivity::onEnter() {
   waitForConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
   waitForBackRelease = false;
   if (const auto* book = findBook(bookPath)) {
-    resolvedCoverBmpPath = findFastCoverPath(*book);
+    resolvedCoverBmpPath = findFastCoverPath(renderer, *book);
     coverLoadPending = resolvedCoverBmpPath.empty();
   }
   requestUpdate();
@@ -569,9 +569,9 @@ void ReadingStatsDetailActivity::render(RenderLock&&) {
       std::string resolvedCoverPath;
       if (FsHelpers::hasEpubExtension(pendingBook->path)) {
         GfxRenderer::FrameBufferLoan loan(renderer);
-        resolvedCoverPath = ensureCoverPath(*pendingBook);
+        resolvedCoverPath = ensureCoverPath(renderer, *pendingBook);
       } else {
-        resolvedCoverPath = ensureCoverPath(*pendingBook);
+        resolvedCoverPath = ensureCoverPath(renderer, *pendingBook);
       }
       if (!resolvedCoverPath.empty() && resolvedCoverPath != resolvedCoverBmpPath) {
         resolvedCoverBmpPath = std::move(resolvedCoverPath);

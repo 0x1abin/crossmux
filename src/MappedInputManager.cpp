@@ -15,13 +15,15 @@
 
 namespace fui = freeink::ui;
 
-#if FREEINK_DEVICE_METALIO_EINK4_PLUS
 void MappedInputManager::discardBufferedTouch() const {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
   gpio.discardBufferedTouch();
+#else
+  gpio.suppressTouchContact();
+#endif
   resetHomeButtonInput();
   touchHeldOverrideValid = false;
 }
-#endif
 
 void MappedInputManager::update(const bool deferHomeButtonAction) const {
   remoteInput.reset();

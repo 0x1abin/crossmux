@@ -32,7 +32,7 @@ void SettingsListActivity::onEnter() {
 
 void SettingsListActivity::onExit() {
   UiListActivity::onExit();
-  UITheme::getInstance().reload();  // Re-apply theme in case it was changed
+  UITheme::getInstance().reload(renderer);  // Re-apply theme in case it was changed
 }
 
 void SettingsListActivity::loop() {

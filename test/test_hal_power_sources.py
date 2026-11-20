@@ -174,6 +174,15 @@ struct {bool inverted=false;bool isInverted() {return inverted;}void setInverted
 struct HalDisplay {enum {FULL_REFRESH};};
 struct GfxRenderer {
  enum class Orientation {Portrait};
+ enum class PixelSpace {Native,Theme};
+ bool themePixels=true;
+ struct PixelScope {
+   GfxRenderer& renderer; bool previous;
+   explicit PixelScope(GfxRenderer& r, PixelSpace space=PixelSpace::Native):renderer(r),previous(r.themePixels) {
+     r.themePixels=space==PixelSpace::Theme;
+   }
+   ~PixelScope(){renderer.themePixels=previous;}
+ };
  int washes=0,inversions=0;
  void invertScreen() {++inversions;}
  void setOrientation(Orientation) {}
@@ -182,7 +191,7 @@ struct GfxRenderer {
 };
 namespace sleepCover {bool ok=true;bool recover() {return ok;}}
 namespace ReaderUtils {void applyOrientation(GfxRenderer&,uint8_t) {}}
-struct {void drawPopup(GfxRenderer&,const char*) {}} GUI;
+struct {void drawPopup(GfxRenderer& r,const char*) {assert(r.themePixels);}} GUI;
 void drawSleepPopupPreservingFrame(GfxRenderer&) {}
 void releaseSdFontCachesForDecode(GfxRenderer&) {}
 struct Activity {void onEnter() {}};
@@ -190,12 +199,12 @@ struct SleepActivity:Activity {
  bool fromTimeout=false;
  GfxRenderer renderer;
  char chosen='?';
- void renderDefaultSleepScreen() {chosen='D';}
- void renderCustomSleepScreen() {chosen='I';}
- void renderCoverSleepScreen() {chosen='C';}
- void renderLastScreenSleepScreen() {chosen='L';}
- void renderTransparentCustomSleepScreen() {chosen='T';}
- void renderBlankSleepScreen() {chosen='B';}
+ void renderDefaultSleepScreen() {assert(!renderer.themePixels);chosen='D';}
+ void renderCustomSleepScreen() {assert(!renderer.themePixels);chosen='I';}
+ void renderCoverSleepScreen() {assert(!renderer.themePixels);chosen='C';}
+ void renderLastScreenSleepScreen() {assert(!renderer.themePixels);chosen='L';}
+ void renderTransparentCustomSleepScreen() {assert(!renderer.themePixels);chosen='T';}
+ void renderBlankSleepScreen() {assert(!renderer.themePixels);chosen='B';}
  void onEnter();
 };
 """ + body + r"""
@@ -211,10 +220,8 @@ int main() {
   activity.onEnter();
   const char want=reader && mode==CrossPointSettings::COVER_CUSTOM ? 'C' : expected[mode];
   assert(activity.chosen==want);
-  if(mode>=6) assert(activity.renderer.washes==0);
-#if FREEINK_DEVICE_READPICO
-  else assert(activity.renderer.washes==1);
-#endif
+  constexpr bool washEnabled=FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS;
+  assert(activity.renderer.washes==(washEnabled && mode<6 ? 1 : 0));
  }
  SETTINGS.sleepScreen=CrossPointSettings::COVER_TRANSPARENT;
  SETTINGS.quickResumeSleepScreen=CrossPointSettings::QUICK_RESUME_AFTER_TIMEOUT;
@@ -225,11 +232,13 @@ int main() {
 """
     with tempfile.TemporaryDirectory(prefix="sleep-modes-") as directory:
         tmp=Path(directory);(tmp/"check.cpp").write_text("#include <initializer_list>\n"+harness)
-        for pico in (0,1):
-            binary=tmp/f"check-{pico}"
-            subprocess.run(["c++","-std=c++17",f"-DFREEINK_DEVICE_READPICO={pico}",str(tmp/"check.cpp"),"-o",str(binary)],check=True)
+        for pico, plus in ((0, 0), (1, 0), (0, 1)):
+            binary=tmp/f"check-{pico}-{plus}"
+            subprocess.run(["c++","-std=c++17",f"-DFREEINK_DEVICE_READPICO={pico}",
+                            f"-DFREEINK_DEVICE_METALIO_EINK4_PLUS={plus}",str(tmp/"check.cpp"),
+                            "-o",str(binary)],check=True)
             subprocess.run([str(binary)],check=True)
-    print("Sleep modes 0..8, transparent alias7, cover-overlay8, reader/night and ReadPico wash routing passed")
+    print("Sleep modes 0..8, transparent alias7, cover-overlay8, reader/night and Read Pico/Plus wash routing passed")
 
 
 if __name__ == "__main__":

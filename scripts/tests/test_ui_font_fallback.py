@@ -44,7 +44,13 @@ struct EpdFontFamily {
   bool hasCodepoint(uint32_t cp, Style) const { return coverage.contains(cp); }
   void getTextDimensions(const char*,int* w,int* h,Style) const { measured=this;*w=20;*h=20; }
 };
+constexpr int kGlyphScaleOne=256;
 struct GfxRenderer {
+  bool isScalingUi() const { return false; }
+  int uiGlyphScale(int) const { return 256; }
+  static int scaledUiLength(int px) { return px; }
+  static int scaledUiEdge(int px) { return px; }
+  struct PixelScope { explicit PixelScope(const GfxRenderer&) {} };
   std::map<int,EpdFontFamily> fontMap;
   std::map<int,std::array<int,2>> fallbackFontMap_;
   std::map<int,int> preferredFontMap_;
@@ -56,6 +62,7 @@ struct GfxRenderer {
 };
 ''' + method(renderer, 'int GfxRenderer::resolveFontFamilyId(')
             + method(renderer, 'int GfxRenderer::resolveTextFontId(')
+            + method(renderer, 'constexpr int scaleGlyphMetric(')
             + method(renderer, 'int GfxRenderer::getTextWidth(') + r'''
 int main() {
   GfxRenderer r;
@@ -372,7 +379,13 @@ struct SdCardFont {
     assert(std::string(getter(ctx,2))=="…");
   }
 };
+constexpr int kGlyphScaleOne=256;
 struct GfxRenderer {
+  bool isScalingUi() const { return false; }
+  int uiGlyphScale(int) const { return kGlyphScaleOne; }
+  static int scaledUiLength(int px) { return px; }
+  static int scaledUiEdge(int px) { return px; }
+  struct PixelScope { explicit PixelScope(const GfxRenderer&) {} };
   int syntheticBoldPixels=0, renderMode=0;
   FontCacheManager* fontCacheManager_=nullptr;
   mutable int warmed=0;
@@ -449,6 +462,7 @@ struct SdCardFontSystem {
 ''' + table + '\n' + method(renderer, 'int GfxRenderer::resolveFontFamilyId(') + '\n'
         program += method(renderer, 'int GfxRenderer::resolveTextFontId(') + '\n'
         program += 'constexpr int SMALL_CAPS_SCALE_NUM=3, SMALL_CAPS_SCALE_DEN=4;\n'
+        program += method(renderer, 'constexpr int scaleGlyphMetric(') + '\n'
         program += method(renderer, 'constexpr int32_t scaleSmallCapAdvance(') + '\n'
         for name in ('bool SdCardFontManager::loadFamily(', 'int SdCardFontManager::loadFamilyExtraSize(',
                      'void SdCardFontManager::unloadAll(', 'int SdCardFontManager::getFontId('):

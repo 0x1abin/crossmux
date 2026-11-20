@@ -5,8 +5,11 @@
 namespace UiHighDpiProfile {
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
 inline constexpr bool enabled = true;
+// The selected theme owns the layout policy.
+bool active();
 #else
 inline constexpr bool enabled = false;
+inline constexpr bool active() { return false; }
 #endif
 inline constexpr int contentPadding = 32;
 inline constexpr int controlGap = 12;
@@ -32,4 +35,5 @@ namespace HeaderStatusMetrics {
 inline constexpr int topPadding = 10;
 inline constexpr int baseStripHeight = 20;
 inline constexpr int stripHeight = UiHighDpiProfile::enabled ? UiHighDpiProfile::statusHeight : baseStripHeight;
+inline int themeStripHeight() { return UiHighDpiProfile::active() ? UiHighDpiProfile::statusHeight : baseStripHeight; }
 }  // namespace HeaderStatusMetrics

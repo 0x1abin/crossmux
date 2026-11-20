@@ -112,9 +112,7 @@ class MappedInputManager {
   bool wasHomeGesture() const;
   // Configured one-frame action, independent of the gesture that triggered it.
   HomeButtonAction homeButtonAction() const { return homeAction; }
-#if FREEINK_DEVICE_METALIO_EINK4_PLUS
   void discardBufferedTouch() const;
-#endif
   void resetHomeButtonInput() const {
     homeButtonInput.reset();
     deferredHomeAction = HomeButtonAction::Ignore;

@@ -70,6 +70,10 @@ harness = r"""
 namespace fui = freeink::ui;
 using UiScreen = fui::Screen<32>;
 struct GfxRenderer {
+  bool isScalingUi() const { return false; }
+  static int scaledUiLength(int px) { return px; }
+  static int scaledUiHit(int px) { return px; }
+  struct PixelScope { explicit PixelScope(const GfxRenderer&) {} };
 """ + orientation + r"""
   static constexpr int VIEWABLE_MARGIN_TOP=9, VIEWABLE_MARGIN_RIGHT=3, VIEWABLE_MARGIN_BOTTOM=3, VIEWABLE_MARGIN_LEFT=3;
   Orientation orientation = Portrait;
@@ -90,6 +94,12 @@ struct GfxRenderer {
     caption = Rect{x, y, width, ubuntu_10_regular.advanceY};
     captionText = text;
   }
+  struct ClipScope {
+    const GfxRenderer& renderer;
+    std::array<int, 4> old;
+    ClipScope(const GfxRenderer& r,int x,int y,int w,int h):renderer(r),old(r.clip){r.setClipRect(x,y,w,h);}
+    ~ClipScope(){renderer.clip=old;}
+  };
   std::array<int, 4> getClipRect() const { return clip; }
   void setClipRect(int x, int y, int w, int h) const { clip = {x, y, w, h}; }
 };

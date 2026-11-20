@@ -186,9 +186,10 @@ void HomeActivity::resolveGridCoverPaths() {
 }
 
 void HomeActivity::loadGridCover(RecentBook& book, int height, bool& showingLoading, Rect& popupRect) {
+  const int pixelHeight = renderer.toNativeUiLength(height);
   const bool isEpub = FsHelpers::hasReflowableBookExtension(book.path);
   if (!book.coverBmpPath.empty() &&
-      BookCoverLoader::checkCachedCover(UITheme::getCoverThumbPath(book.coverBmpPath, height), isEpub) !=
+      BookCoverLoader::checkCachedCover(UITheme::getCoverThumbPath(book.coverBmpPath, pixelHeight), isEpub) !=
           BookCoverLoader::CachedCoverState::Missing)
     return;
   // Only one parser lives at a time; EPUB/XTC objects exceed the stack budget.
@@ -199,7 +200,7 @@ void HomeActivity::loadGridCover(RecentBook& book, int height, bool& showingLoad
       return;
     }
     book.coverBmpPath = epub->getThumbBmpPath();
-    if (BookCoverLoader::checkCachedCover(epub->getThumbBmpPath(height), true) !=
+    if (BookCoverLoader::checkCachedCover(epub->getThumbBmpPath(pixelHeight), true) !=
         BookCoverLoader::CachedCoverState::Missing)
       return;
     if (!showingLoading) {
@@ -207,7 +208,7 @@ void HomeActivity::loadGridCover(RecentBook& book, int height, bool& showingLoad
       popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
       GUI.fillPopupProgress(renderer, popupRect, 0);
     }
-    if (epub->generateThumbBmpFromSource(height)) {
+    if (epub->generateThumbBmpFromSource(pixelHeight)) {
       return;
     }
   } else if (FsHelpers::hasXtcExtension(book.path)) {
@@ -217,7 +218,7 @@ void HomeActivity::loadGridCover(RecentBook& book, int height, bool& showingLoad
       return;
     }
     book.coverBmpPath = xtc->getThumbBmpPath();
-    if (BookCoverLoader::checkCachedCover(xtc->getThumbBmpPath(height), false) !=
+    if (BookCoverLoader::checkCachedCover(xtc->getThumbBmpPath(pixelHeight), false) !=
         BookCoverLoader::CachedCoverState::Missing)
       return;
     if (!showingLoading) {
@@ -225,7 +226,7 @@ void HomeActivity::loadGridCover(RecentBook& book, int height, bool& showingLoad
       popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
       GUI.fillPopupProgress(renderer, popupRect, 0);
     }
-    if (xtc->load() && xtc->generateThumbBmp(height)) {
+    if (xtc->load() && xtc->generateThumbBmp(pixelHeight)) {
       return;
     }
   }
@@ -239,6 +240,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
   const bool useFullCover =
       static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
 
+  const int pixelHeight = renderer.toNativeUiLength(coverHeight);
   int progress = 0;
   for (RecentBook& book : recentBooks) {
     // The cover grid shares one slot size; generating at any other height
@@ -284,7 +286,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
     }
     if (book.coverBmpPath.empty()) continue;
 
-    const std::string coverPath = UITheme::getCoverThumbPath(book.coverBmpPath, coverHeight);
+    const std::string coverPath = UITheme::getCoverThumbPath(book.coverBmpPath, pixelHeight);
     // EPUB thumbnails keep an empty file as the persistent "no supported cover" marker.
     if (BookCoverLoader::checkCachedCover(coverPath, isEpub && !useFullCover) !=
         BookCoverLoader::CachedCoverState::Missing)
@@ -300,7 +302,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
       {
         GfxRenderer::FrameBufferLoan loan(renderer);
         generatedPath = useFullCover ? BookCoverLoader::ensureFullCover(book.path)
-                                     : BookCoverLoader::ensureThumbnail(book.path, coverHeight);
+                                     : BookCoverLoader::ensureThumbnail(book.path, pixelHeight);
       }
       // Inflate used the old framebuffer bytes. Rebuild a complete, known
       // loading frame before the next progress refresh can reach the panel.
@@ -309,7 +311,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
       GUI.fillPopupProgress(renderer, popupRect, 10 + currentProgress * (90 / recentBooks.size()));
     } else {
       generatedPath = useFullCover ? BookCoverLoader::ensureFullCover(book.path)
-                                   : BookCoverLoader::ensureThumbnail(book.path, coverHeight);
+                                   : BookCoverLoader::ensureThumbnail(book.path, pixelHeight);
     }
     if (generatedPath.empty() && isXtc) LOG_ERR("HOME", "Failed to generate XTC cover: %s", book.path.c_str());
   }

@@ -19,6 +19,7 @@ void indexBuildYield(void*) { vTaskDelay(1); }
 }  // namespace
 
 void DictionaryWordSelectActivity::onEnter() {
+  const GfxRenderer::PixelScope physical(renderer);
   Activity::onEnter();
   fontId = SETTINGS.getReaderFontId();
   lookupPending = true;
@@ -130,6 +131,7 @@ void DictionaryWordSelectActivity::performLookup() {
 }
 
 void DictionaryWordSelectActivity::loop() {
+  const GfxRenderer::PixelScope physical(renderer);
   if (lookupPending) {
     lookupPending = false;
     performLookup();
@@ -144,6 +146,7 @@ void DictionaryWordSelectActivity::loop() {
 }
 
 void DictionaryWordSelectActivity::render(RenderLock&&) {
+  const GfxRenderer::PixelScope physical(renderer);
   renderer.clearScreen();
 
   auto* fcm = renderer.getFontCacheManager();

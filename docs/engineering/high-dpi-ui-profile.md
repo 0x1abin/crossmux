@@ -4,10 +4,24 @@ Status: existing NotoSans typography, splash and top battery layout were confirm
 in the native simulator on 2026-10-02. The latest requested reader footer uses
 5px visible bottom clearance and 14px side insets; native captures verify the
 5px downward and 18px outward movements from the preceding confirmed layout.
-The profile is enabled in `readpico_hardware`, inherited by `readpico` and
-`readpico_nightly`, and in `simulator_readpico`. The existing-font/SVG build has been flashed without backup to the connected
+The profile is enabled in the Read Pico hardware builds and simulator, as
+well as the Metalio E-Ink4 Plus hardware builds. The existing-font/SVG build has been flashed without backup to the connected
 ReadPico before the PR rebase and passed a 40-second startup/heap smoke test. Visual refresh and
 touch acceptance on the physical panel remain pending.
+
+## Theme scaling on 1216 × 684 panels
+
+Read Pico and Metalio E-Ink4 Plus use the native high-DPI layout for Inx.
+Their other themes lay out the UI in logical coordinates at a 1.5× scale.
+The renderer maps both edges of each rectangle and maps normalized touch
+back to the same logical coordinates. Theme changes rebuild the interaction
+table and discard the previous touch contact. The proportional UI draws
+from the embedded faces and SD font fallback already used on these boards.
+
+Book content and sleep images render in native pixels. Reader chrome
+reserves the corresponding physical space before pagination, and chapter
+caches validate the resulting viewport. The framebuffer and grayscale
+transactions use the same panel geometry in both themes.
 
 ## Current upstream rehearsal
 
@@ -37,8 +51,8 @@ The UI preset is calibrated for roughly 300 PPI; this is a density class, not
 an exact panel PPI or an automatic numeric threshold. Device identity, native
 resolution, bezel data and hardware capabilities remain in the board profile.
 Targets opt in explicitly with `CROSSMUX_UI_PROFILE_HIGH_DPI`, owned by
-[`UiHighDpiProfile.h`](../../src/components/UiHighDpiProfile.h). Only ReadPico
-hardware/Nightly and its simulator currently select it. Other similar-density
+[`UiHighDpiProfile.h`](../../src/components/UiHighDpiProfile.h). Read Pico
+hardware/Nightly and its simulator, and Metalio E-Ink4 Plus hardware select it. Other similar-density
 panels may reuse the fonts, icons and control sizes after viewport validation;
 a smaller panel still has less available space. Layout uses actual oriented
 dimensions and safe areas. Memory and PSRAM policies remain independent of PPI.
@@ -52,7 +66,7 @@ The existing theme, scaling, list and toolbar paths own rendering and input.
 `InxItemLayout.h:65` supplies the grid rectangles to both drawing and hit testing.
 This avoids a parallel rendering framework or a second framebuffer.
 
-| Element | Dimensions in native logical pixels |
+| Element | Inx dimensions in native pixels |
 | --- | --- |
 | Content side inset / adjacent control gap | 32 / 12 |
 | Main navigation / status band | 96 / 48 |
@@ -128,7 +142,8 @@ regenerated for this revision.
 ## Boot and default sleep splash
 
 `BaseTheme::drawSplash()` is shared by `BootActivity::renderSplash()` and
-`SleepActivity::renderDefaultSleepScreen()`. On the high-density profile it centers
+`SleepActivity::renderDefaultSleepScreen()`. Both render in native panel pixels
+across themes. On the high-density profile the splash centers
 the complete logo/title/status block in the oriented safe area. The existing
 120px static logo is drawn at its native size; the title uses the resident
 16pt bold face and the boot/sleep status uses the resident 14pt face. Logo-to-title

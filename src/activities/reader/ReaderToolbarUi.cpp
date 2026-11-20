@@ -30,13 +30,12 @@ constexpr fui::ActionId ACTION_ROW = 6;      // panel list row, value = row inde
 // Scrub row: two small round-cornered chapter buttons flanking a thin progress
 // track with a round knob -- the reading page's chrome is light, so the
 // controls stay slim rather than control-center sized.
-constexpr int16_t kScrubButton =
-    UiHighDpiProfile::enabled ? UiHighDpiProfile::buttonHeight : 36;  // chapter step buttons (square)
-constexpr int16_t kScrubKnob = UiHighDpiProfile::enabled ? 28 : 16;   // round knob on the 2px progress track
-constexpr int16_t kScrubGap = 12;                                     // air between the buttons and the track
+int16_t scrubButton() { return UiHighDpiProfile::active() ? UiHighDpiProfile::buttonHeight : 36; }
+int16_t scrubKnob() { return UiHighDpiProfile::active() ? 28 : 16; }
+constexpr int16_t kScrubGap = 12;  // air between the buttons and the track
 // Tool row: a 24px glyph centred in each slot, the active slot in an outline
 // pill. The whole slot is the tap target; the row height sets its size.
-constexpr int16_t kToolRowH = UiHighDpiProfile::enabled ? 112 : 80;
+int16_t toolRowHeight() { return UiHighDpiProfile::active() ? 112 : 80; }
 constexpr int16_t kToolPillInset = 10;
 constexpr int kToolCount = 3;
 // Bottom sheet height for the panels. ListNav fits whole rows in the remaining
@@ -48,9 +47,10 @@ constexpr int kPanelHeightMaxPercent = 72;
 constexpr int kLandscapePanelHeightPercent = 88;
 }  // namespace
 
-ReaderToolbarUi::ReaderToolbarUi(GfxRenderer& renderer) : UiAppHost(renderer, true) {}
+ReaderToolbarUi::ReaderToolbarUi(GfxRenderer& renderer) : UiAppHost(renderer, true), renderer_(renderer) {}
 
 void ReaderToolbarUi::begin() {
+  const GfxRenderer::PixelScope uiPixels(renderer_, GfxRenderer::PixelSpace::Theme);
   resetUi();
   pending_ = Routed{};
   nav_.reset();
@@ -61,6 +61,7 @@ void ReaderToolbarUi::begin() {
 }
 
 void ReaderToolbarUi::render() {
+  const GfxRenderer::PixelScope uiPixels(renderer_, GfxRenderer::PixelSpace::Theme);
   renderUi();
   // Wrapped rows can fit fewer than the fixed-height estimate; the nav then
   // advances the viewport after layout and asks for a rebuild. Converges (top
@@ -69,6 +70,7 @@ void ReaderToolbarUi::render() {
 }
 
 ReaderToolbarUi::Routed ReaderToolbarUi::route(const MappedInputManager& input) {
+  const GfxRenderer::PixelScope uiPixels(renderer_, GfxRenderer::PixelSpace::Theme);
   pending_ = Routed{};
   // routeHeld: the scrub track is a drag target, so held frames must reach it.
   const auto touch = routeTouch(input, false, /*routeHeld=*/true);
@@ -109,11 +111,13 @@ void ReaderToolbarUi::screenFn(UiScreen& screen, void* user) {
 // tiles, no labels -- the glyphs carry the meaning).
 void ReaderToolbarUi::buildToolRow(UiScreen& screen, const fui::LayoutAnchor anchor, const int16_t sideInset) {
   const auto& tokens = screen.theme();
-  constexpr int iconSize = UiHighDpiProfile::enabled ? UiHighDpiProfile::controlIconSize : 24;
+  const int iconSize = UiHighDpiProfile::active() ? UiHighDpiProfile::controlIconSize : 24;
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
-  const fui::BitmapRef icons[kToolCount] = {fui::bitmapFromIcon(icon_reader_contents_48),
-                                            fui::bitmapFromIcon(icon_reader_text_48),
-                                            fui::bitmapFromIcon(icon_reader_more_48)};
+  const bool native = UiHighDpiProfile::active();
+  const fui::BitmapRef icons[kToolCount] = {
+      fui::bitmapFromIcon(native ? icon_reader_contents_48 : icon_reader_contents_24),
+      fui::bitmapFromIcon(native ? icon_reader_text_48 : icon_reader_text_24),
+      fui::bitmapFromIcon(native ? icon_reader_more_48 : icon_reader_more_24)};
 #else
   const fui::BitmapRef icons[kToolCount] = {fui::bitmapFromIcon(icon_reader_contents_24),
                                             fui::bitmapFromIcon(icon_reader_text_24),
@@ -123,7 +127,7 @@ void ReaderToolbarUi::buildToolRow(UiScreen& screen, const fui::LayoutAnchor anc
   // (the toolbar's is spaceLg-inset, the panel's is full width): the slots
   // must land on the same x either way, or the icons jump when a tap swaps
   // the toolbar for a panel.
-  const fui::Rect row = screen.take(anchor, kToolRowH).inset(fui::Insets{0, sideInset, 0, sideInset});
+  const fui::Rect row = screen.take(anchor, toolRowHeight()).inset(fui::Insets{0, sideInset, 0, sideInset});
   const int16_t slotW = static_cast<int16_t>(row.width / kToolCount);
   // Theme radius as-is (the frontlight panel pattern); the fill clamps to
   // the shape's own height so round themes cannot overshoot.
@@ -149,8 +153,8 @@ void ReaderToolbarUi::buildToolbar(UiScreen& screen) {
   // air between them (a full spaceLg under the scrub row, so the progress
   // track and its chapter buttons don't crowd the meta line).
   const int16_t metaH = screen.target().lineHeight(tokens.smallText.font);
-  const int16_t contentH = static_cast<int16_t>(tokens.spaceMd + kScrubButton + tokens.spaceLg + metaH +
-                                                tokens.spaceSm + kToolRowH + tokens.spaceSm);
+  const int16_t contentH = static_cast<int16_t>(tokens.spaceMd + scrubButton() + tokens.spaceLg + metaH +
+                                                tokens.spaceSm + toolRowHeight() + tokens.spaceSm);
   fui::SheetProps sheetProps;
   sheetProps.anchor = fui::SheetEdge::Bottom;
   sheetProps.dismissAction = ACTION_DISMISS;
@@ -167,10 +171,10 @@ void ReaderToolbarUi::buildToolbar(UiScreen& screen) {
 
   // Scrub row: < [progress track + knob: tap/drag to jump] >
   {
-    const fui::Rect band = screen.takeTop(kScrubButton, tokens.spaceLg);
+    const fui::Rect band = screen.takeTop(scrubButton(), tokens.spaceLg);
     stepProps_.label = nullptr;
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
-    stepProps_.icon = fui::bitmapFromIcon(icon_reader_back_48);
+    stepProps_.icon = fui::bitmapFromIcon(UiHighDpiProfile::active() ? icon_reader_back_48 : icon_reader_back_24);
 #else
     stepProps_.icon = fui::bitmapFromIcon(icon_reader_back_24);
 #endif
@@ -188,30 +192,30 @@ void ReaderToolbarUi::buildToolbar(UiScreen& screen) {
     stepProps_.styles.active = stepProps_.styles.normal;
     stepProps_.styles.active.background = fui::Paint::solid(fui::Color::Black);
     stepProps_.styles.active.foreground = fui::Paint::solid(fui::Color::White);
-    screen.button(stepProps_, fui::Rect{band.x, band.y, kScrubButton, kScrubButton});
+    screen.button(stepProps_, fui::Rect{band.x, band.y, scrubButton(), scrubButton()});
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
-    stepProps_.icon = fui::bitmapFromIcon(icon_reader_next_48);
+    stepProps_.icon = fui::bitmapFromIcon(UiHighDpiProfile::active() ? icon_reader_next_48 : icon_reader_next_24);
 #else
     stepProps_.icon = fui::bitmapFromIcon(icon_reader_next_24);
 #endif
     stepProps_.action = ACTION_NEXT;
     screen.button(stepProps_,
-                  fui::Rect{static_cast<int16_t>(band.right() - kScrubButton), band.y, kScrubButton, kScrubButton});
+                  fui::Rect{static_cast<int16_t>(band.right() - scrubButton()), band.y, scrubButton(), scrubButton()});
 
     // Progress: a 2px track with a solid round knob at the book position (the
     // fill edge IS the handle, so nothing else is drawn), the scrub hit rect
     // spanning the whole band height so a finger a little off the line still
     // scrubs. Tap-to-jump / drag arrive as dragPermille along this rect.
-    const int16_t trackX = static_cast<int16_t>(band.x + kScrubButton + kScrubGap);
-    const int16_t trackW = static_cast<int16_t>(band.width - 2 * (kScrubButton + kScrubGap));
+    const int16_t trackX = static_cast<int16_t>(band.x + scrubButton() + kScrubGap);
+    const int16_t trackW = static_cast<int16_t>(band.width - 2 * (scrubButton() + kScrubGap));
     const int16_t trackY = static_cast<int16_t>(band.y + band.height / 2);
     const fui::Paint ink = fui::Paint::solid(fui::Color::Black);
     screen.target().fill(fui::Rect{trackX, static_cast<int16_t>(trackY - 1), trackW, 2}, ink);
     const int permille = std::clamp(model_.progressPermille, 0, 1000);
     const int16_t knobX = static_cast<int16_t>(trackX + (static_cast<int32_t>(trackW - 1) * permille) / 1000);
-    screen.target().fill(fui::Rect{static_cast<int16_t>(knobX - kScrubKnob / 2),
-                                   static_cast<int16_t>(trackY - kScrubKnob / 2), kScrubKnob, kScrubKnob},
-                         ink, static_cast<uint8_t>(kScrubKnob / 2));
+    screen.target().fill(fui::Rect{static_cast<int16_t>(knobX - scrubKnob() / 2),
+                                   static_cast<int16_t>(trackY - scrubKnob() / 2), scrubKnob(), scrubKnob()},
+                         ink, static_cast<uint8_t>(scrubKnob() / 2));
     screen.frame().hit(fui::Rect{trackX, band.y, trackW, band.height}, ACTION_SCRUB, 0,
                        fui::InputTouch | fui::InputDrag);
   }
@@ -257,7 +261,7 @@ void ReaderToolbarUi::buildPanel(UiScreen& screen) {
   const int16_t grabberBand =
       static_cast<int16_t>(sheetProps.grabberMargin + sheetProps.grabberHeight + sheetProps.grabberInset);
   const int16_t chrome =
-      static_cast<int16_t>(grabberBand + titleH + tokens.spaceMd + tokens.spaceSm + kToolRowH + tokens.spaceSm);
+      static_cast<int16_t>(grabberBand + titleH + tokens.spaceMd + tokens.spaceSm + toolRowHeight() + tokens.spaceSm);
   const bool landscape = safe.width > safe.height;
   const int16_t target =
       static_cast<int16_t>((safe.height * (landscape ? kLandscapePanelHeightPercent : kPanelHeightPercent)) / 100);
@@ -294,8 +298,8 @@ void ReaderToolbarUi::buildPanel(UiScreen& screen) {
   listProps_.rowHeight = rowH;
   listProps_.rowGap = rowGap;
   listProps_.toggleCheckbox = true;
-  listProps_.toggleWidth = UiHighDpiProfile::enabled ? 48 : 28;
-  listProps_.toggleHeight = UiHighDpiProfile::enabled ? 48 : 28;
+  listProps_.toggleWidth = UiHighDpiProfile::active() ? 48 : 28;
+  listProps_.toggleHeight = UiHighDpiProfile::active() ? 48 : 28;
   // The label column starts flush with the panel title (no list-side padding
   // on top of the sheet's own inset). Body-size text: small reads condensed
   // and the taller row doubles as the tap target.

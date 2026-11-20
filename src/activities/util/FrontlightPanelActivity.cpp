@@ -38,8 +38,8 @@ constexpr fui::ActionId ACTION_TILE = 6;  // value = tile index
 constexpr int16_t kPanelSideMargin = 16;
 constexpr int16_t kGrabberHeight = 5;     // fui::SheetProps default, mirrored here
 constexpr int16_t kSliderRowHeight = 56;  // the pill itself (finger-sized)
-constexpr int16_t kTileHeight = UiHighDpiProfile::enabled ? UiHighDpiProfile::buttonHeight : 84;
-constexpr int16_t kTileGap = UiHighDpiProfile::enabled ? UiHighDpiProfile::controlGap : 16;
+int16_t tileHeight() { return UiHighDpiProfile::active() ? UiHighDpiProfile::buttonHeight : 84; }
+int16_t tileGap() { return UiHighDpiProfile::active() ? UiHighDpiProfile::controlGap : 16; }
 constexpr int kTileCols = 2;
 constexpr int kInxTileCount = 4;
 constexpr int16_t kQuickControlSize = kSliderRowHeight;
@@ -307,7 +307,7 @@ int FrontlightPanelActivity::computePanelBottom() const {
   // Icons are touch targets, so a buttons-only board gets no row and the
   // sheet is exactly the frontlight controls.
   if (mappedInput.hasTouch()) {
-    y += UITheme::getInstance().hasMainTabs() ? fui::tileGridHeight(kInxTileCount, kTileCols, kTileHeight, kTileGap)
+    y += UITheme::getInstance().hasMainTabs() ? fui::tileGridHeight(kInxTileCount, kTileCols, tileHeight(), tileGap())
                                               : kQuickControlSize;
   }
   // The sheet's grabber band: content margin + grabber + air to the edge.
@@ -426,8 +426,8 @@ void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
     gridProps.items = gridItems;
     gridProps.count = static_cast<uint16_t>(kInxTileCount);
     gridProps.action = ACTION_TILE;
-    gridProps.tileHeight = kTileHeight;
-    gridProps.gap = kTileGap;
+    gridProps.tileHeight = tileHeight();
+    gridProps.gap = tileGap();
     screen.tileGrid(gridProps);
   } else if (mappedInput.hasTouch()) {
     const int tileCount = bleturner::status().compiledIn ? kTileCount : kTileCount - 1;

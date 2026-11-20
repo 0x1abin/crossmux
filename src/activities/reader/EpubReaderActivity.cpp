@@ -991,6 +991,7 @@ void EpubReaderActivity::openClippings() {
 }
 
 void EpubReaderActivity::loop() {
+  const GfxRenderer::PixelScope physical(renderer);
   if (loadFailurePopup.isActive()) {
     loadFailurePopup.handleInput(mappedInput, [this] { requestUpdate(); });
     return;
@@ -2256,6 +2257,7 @@ void EpubReaderActivity::renderBook() {
       (statusBarHeight == 0 || statusBarHeight == UITheme::getInstance().getProgressBarHeight())) {
     bottomReserve += UITheme::getInstance().getMetrics().statusBarVerticalMargin;
   }
+  bottomReserve = renderer.toNativeUiLength(bottomReserve);
   if (UITheme::getInstance().hasMainTabs()) {
     if (UiHighDpiProfile::enabled && (SETTINGS.statusBarSpec().textLaneVisible() || automaticPageTurnActive)) {
       // INX retains its existing footer gap and high-DPI space reuse.
@@ -2797,6 +2799,7 @@ void EpubReaderActivity::freePageCache() {
 }
 
 void EpubReaderActivity::renderIdle(const uint32_t generation) {
+  const GfxRenderer::PixelScope physical(renderer);
   const auto cancelled = [&] { return activityManager.idleRenderCancelled(generation); };
   // Every exit below names the condition it took. Without that, "the cache never hits"
   // is indistinguishable from "the build was cancelled", "the layout moved since the
@@ -3547,6 +3550,7 @@ void EpubReaderActivity::drawClippingHighlights(const Page& page, const int font
 }
 
 void EpubReaderActivity::renderStatusBar() const {
+  const GfxRenderer::PixelScope uiPixels(renderer, GfxRenderer::PixelSpace::Theme);
   const int currentPage = section ? section->currentPage + 1 : 1;
   const int pageCount = section ? section->estimatedTotalPages() : 1;
   const float bookProgress = bookProgressFor({currentPage - 1, pageCount}, true) * 100;
@@ -3890,6 +3894,7 @@ void EpubReaderActivity::closeOverlayToPage() {
 }
 
 void EpubReaderActivity::renderOverlay() {
+  const GfxRenderer::PixelScope uiPixels(renderer, GfxRenderer::PixelSpace::Theme);
   if (!epub || !section || !toolbarUi) return;
 
   ReaderToolbarUi::Model model;
@@ -3955,6 +3960,7 @@ void EpubReaderActivity::renderOverlay() {
 }
 
 void EpubReaderActivity::handleOverlayInput() {
+  const GfxRenderer::PixelScope uiPixels(renderer, GfxRenderer::PixelSpace::Theme);
   if (!toolbarUi) return;
 
   // A modal option picker over the panel owns all input while open.
@@ -4239,6 +4245,7 @@ void EpubReaderActivity::handleOverlayInput() {
 // The dialog draws over the current framebuffer without clearing; erasing it
 // on dismissal is the popup gate's restore in handleOverlayInput().
 void EpubReaderActivity::paintOverlayPopup() {
+  const GfxRenderer::PixelScope uiPixels(renderer, GfxRenderer::PixelSpace::Theme);
   RenderLock lock;
   settleOverlayRefresh();
   overlayPopup.render(renderer);

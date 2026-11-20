@@ -5,14 +5,17 @@ It carries the board changes from [CrossPoint Plus `ea534874`](https://github.co
 and [FreeInk SDK PR #166 `99901125`](https://github.com/Free-Ink/freeink-sdk/pull/166)
 on the CrossMux SDK fork `0af7bb68e1e64939ed92663464fbd03f02329c6a`.
 The SDK candidate pins [EPDiy `edc78157`](https://github.com/Free-Ink/epdiy/commit/edc78157fdf20d0ccff405b6e5164d0663acd803).
-The development build uses the patched SDK checkout. The archived SDK and
-CrossMux patches reproduce it without pointing a gitlink at a local commit.
+The CrossMux submodule pins the reviewed FreeInk SDK revision.
 
 ## Board and reader
 
 - ESP32-S31, 16 MiB Flash, 16 MiB octal PSRAM, 1216 × 684 E0470A14-AF on the
-  8-bit LCD bus. The firmware uses the Read Pico high-DPI UI profile, native
-  layout coordinates and Plus-specific bezel insets.
+  8-bit LCD bus and Plus-specific bezel insets. Inx uses the native high-DPI
+  layout. The other themes use the upstream 1.5× UI scale, as on Read Pico.
+  The battery glyph and percentage share the scaled text metrics.
+- Sleep images use the original Read Pico layout in native pixels. The panel
+  gets a full white refresh before a replacement image. Quick Resume and
+  transparent overlays retain the previous frame.
 - Fast uses the reinforced GC16 waveform. Half drives all pixels and Full
   cleans before the redraw. Native gray transactions borrow the EPDiy front
   buffer, even pixel in the low nibble, 0 black and 15 white. The reader and
@@ -49,14 +52,11 @@ removing the unused class implementations and USB host stack.
 ## Build and acceptance
 
 ```sh
-git submodule update --init freeink-sdk
-git -C freeink-sdk apply --index /path/to/freeink-sdk.patch
-git -C freeink-sdk submodule update --init --recursive
+git submodule update --init --recursive
 PLATFORMIO_CORE_DIR=/tmp/crossmux-plus-beta-pio PLATFORMIO_BUILD_DIR=.pio/build-s31 pio run -e metalio_eink4_plus
 python3 -m unittest discover -s scripts/tests -p test_metalio_eink4_plus.py
 ```
 
-Run the SDK apply step on a clean checkout of the pinned fork with the archived SDK patch.
 Use PlatformIO Core 6.2+ and pioarduino 61.04.00-RC1. The S31 build keeps its
 Core directory separate from the other target's ESP-IDF toolchain. Build
 checks cover the waveform, framebuffer transaction, touch sampling and
@@ -69,7 +69,7 @@ LCD feed underruns. The November 10 evidence retains the two matching 16 MiB
 flash backups and the original NVS. One historical candidate damaged NVS
 namespace metadata on page 0. Its root cause remains open.
 
-## Hardware acceptance on 2026-11-20
+## Hardware acceptance before the integration refactor
 
 The candidate was tested on an ESP32-S31 revision 0.0 with 16 MiB flash.
 The live bootloader matched the candidate's ESP-IDF v6.1-803-g94639ab7251

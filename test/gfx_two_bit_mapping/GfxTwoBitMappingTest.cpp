@@ -53,3 +53,16 @@ TEST(GfxTwoBitMapping, BwKeepsLogicalPixelState) {
     EXPECT_TRUE(pixel.state);
   }
 }
+
+TEST(GfxUiScale, HitTestIsTheInverseOfEachRoundedEdge) {
+  for (const int nativeExtent : {684, 1216}) {
+    const int logicalExtent = GfxRenderer::scaledUiLength(nativeExtent);
+    EXPECT_EQ(logicalExtent, nativeExtent == 684 ? 456 : 811);
+    for (int pixel = 0; pixel < nativeExtent; ++pixel) {
+      const int coordinate = GfxRenderer::scaledUiHit(pixel);
+      ASSERT_LT(coordinate, logicalExtent);
+      EXPECT_LE(GfxRenderer::scaledUiEdge(coordinate), pixel);
+      EXPECT_LT(pixel, GfxRenderer::scaledUiEdge(coordinate + 1));
+    }
+  }
+}

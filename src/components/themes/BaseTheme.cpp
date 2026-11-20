@@ -42,6 +42,7 @@ freeink::ui::BitmapRef BaseTheme::checkboxIcon(const bool checked) {
 }
 
 void BaseTheme::drawSplash(const GfxRenderer& renderer, const char* status, const char* version) {
+  const GfxRenderer::PixelScope physical(renderer);
   const int pageWidth = renderer.getScreenWidth();
   const int pageHeight = renderer.getScreenHeight();
   renderer.clearScreen();
@@ -97,8 +98,12 @@ bool drawHeaderBattery(freeink::ui::DrawTarget& target, freeink::ui::Rect rect,
 }
 
 // Plot only ink pixels; the white bits are transparent. No render-time buffers.
-void drawTransparentBitmap(const GfxRenderer& renderer, const freeink::Icon& icon, const int x, const int y,
-                           const bool black) {
+void drawTransparentBitmap(const GfxRenderer& renderer, const freeink::Icon& icon, int x, int y, const bool black) {
+  if (renderer.isScalingUi()) {
+    x = GfxRenderer::scaledUiEdge(x);
+    y = GfxRenderer::scaledUiEdge(y);
+  }
+  const GfxRenderer::PixelScope native(renderer);
   for (int row = 0; row < icon.h; ++row) {
     for (int column = 0; column < icon.w; ++column) {
       if ((icon.bits[row * ((icon.w + 7) / 8) + column / 8] & (0x80U >> (column % 8))) == 0) {
@@ -213,8 +218,14 @@ void BaseTheme::drawBatteryLeft(const GfxRenderer& renderer, Rect rect, const bo
   // Left aligned: icon on left, percentage on right (reader mode)
   const uint16_t percentage = powerManager.getBatteryPercentage();
   const bool preserveInx = UITheme::getInstance().hasMainTabs();
-  int y = rect.y + (preserveInx && UiHighDpiProfile::enabled && rect.height != UiHighDpiProfile::batteryHeight ? 8 : 6);
-  if (!preserveInx) {
+  char percentageText[8];
+  snprintf(percentageText, sizeof(percentageText), "%u%%", static_cast<unsigned>(percentage));
+  int y =
+      rect.y + (preserveInx && UiHighDpiProfile::active() && rect.height != UiHighDpiProfile::batteryHeight ? 8 : 6);
+  if (renderer.isScalingUi()) {
+    const auto [top, height] = renderer.getAsciiTextInkY(STATUS_NUMERIC_FONT_ID, percentageText);
+    if (height > 0) y = rect.y + top + (height - rect.height) / 2;
+  } else if (!preserveInx) {
     // Shared themes center the icon on the digits' ink; INX keeps its existing offset.
     const auto fontIt = renderer.getFontMap().find(SMALL_FONT_ID);
     if (fontIt != renderer.getFontMap().end()) {
@@ -226,9 +237,7 @@ void BaseTheme::drawBatteryLeft(const GfxRenderer& renderer, Rect rect, const bo
   }
 
   if (showPercentage) {
-    const auto percentageText = std::to_string(percentage) + "%";
-    renderer.drawText(STATUS_NUMERIC_FONT_ID, rect.x + batteryPercentSpacing + rect.width, rect.y,
-                      percentageText.c_str());
+    renderer.drawText(STATUS_NUMERIC_FONT_ID, rect.x + batteryPercentSpacing + rect.width, rect.y, percentageText);
   }
 
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
@@ -263,28 +272,32 @@ void BaseTheme::drawCoverPlaceholder(const GfxRenderer& renderer, Rect rect) {
 bool BaseTheme::drawCoverThumbFill(const GfxRenderer& renderer, const Bitmap& bitmap, Rect slot, const int xOffset) {
   if (slot.width <= 0 || slot.height <= 0) return false;
   // xOffset nudges the centered art sideways; the clip stays on the slot.
-  const int x = slot.x + (slot.width - bitmap.getWidth()) / 2 + xOffset;
-  const int y = slot.y + (slot.height - bitmap.getHeight()) / 2;
+  const int x = slot.x + (slot.width - renderer.bitmapUiWidth(bitmap)) / 2 + xOffset;
+  const int y = slot.y + (slot.height - renderer.bitmapUiHeight(bitmap)) / 2;
   const auto clip = renderer.getClipRect();
   const int left = std::max(slot.x, clip[0]);
   const int top = std::max(slot.y, clip[1]);
-  renderer.setClipRect(left, top, std::max(0, std::min(slot.x + slot.width, clip[0] + clip[2]) - left),
-                       std::max(0, std::min(slot.y + slot.height, clip[1] + clip[3]) - top));
-  const bool drawn = renderer.drawBitmap(bitmap, x, y, bitmap.getWidth(), bitmap.getHeight());
-  renderer.setClipRect(clip[0], clip[1], clip[2], clip[3]);
-  return drawn;
+  const GfxRenderer::ClipScope coverClip(renderer, left, top,
+                                         std::max(0, std::min(slot.x + slot.width, clip[0] + clip[2]) - left),
+                                         std::max(0, std::min(slot.y + slot.height, clip[1] + clip[3]) - top));
+  return renderer.drawBitmap(bitmap, x, y, renderer.bitmapUiWidth(bitmap), renderer.bitmapUiHeight(bitmap));
 }
 
 void BaseTheme::drawBatteryRight(const GfxRenderer& renderer, Rect rect, const bool showPercentage,
                                  const int numericFontId) const {
   const uint16_t percentage = powerManager.getBatteryPercentage();
-  const int y = rect.y + (UiHighDpiProfile::enabled && rect.height != UiHighDpiProfile::batteryHeight ? 8 : 6);
-  const int gap = UiHighDpiProfile::enabled ? UiHighDpiProfile::controlGap : batteryPercentSpacing;
+  int y = rect.y + (UiHighDpiProfile::active() && rect.height != UiHighDpiProfile::batteryHeight ? 8 : 6);
+  const int gap = UiHighDpiProfile::active() ? UiHighDpiProfile::controlGap : batteryPercentSpacing;
+  char percentageText[8];
+  snprintf(percentageText, sizeof(percentageText), "%u%%", static_cast<unsigned>(percentage));
+  if (renderer.isScalingUi()) {
+    const auto [top, height] = renderer.getAsciiTextInkY(numericFontId, percentageText);
+    if (height > 0) y = rect.y + top + (height - rect.height) / 2;
+  }
 
   if (showPercentage) {
-    const auto percentageText = std::to_string(percentage) + "%";
-    const int textWidth = renderer.getTextWidth(numericFontId, percentageText.c_str());
-    renderer.drawText(numericFontId, rect.x - textWidth - gap, rect.y, percentageText.c_str());
+    const int textWidth = renderer.getTextWidth(numericFontId, percentageText);
+    renderer.drawText(numericFontId, rect.x - textWidth - gap, rect.y, percentageText);
   }
 
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
@@ -580,7 +593,9 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 // looks like it overhangs the content columns.
 int BaseTheme::headerStatusInset(bool upstreamStyle) { return uiThemeMetrics(upstreamStyle).headerSidePadding + 4; }
 
-int BaseTheme::headerStatusHeight() { return HeaderStatusMetrics::stripHeight + BoardConfig::ACTIVE.headerOffsetY; }
+int BaseTheme::headerStatusHeight() {
+  return HeaderStatusMetrics::themeStripHeight() + BoardConfig::ACTIVE.headerOffsetY;
+}
 
 void BaseTheme::drawHeaderStatus(const GfxRenderer& renderer, const Rect rect, const char* date) {
   if (rect.width <= 0 || rect.height <= 0) return;
@@ -647,8 +662,10 @@ void BaseTheme::applyHeaderStatus(const GfxRenderer& renderer, freeink::ui::Head
   status.battery.glyphHeight = static_cast<int16_t>(metrics.batteryHeight);
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
   // FreeInkUI reserves the terminal separately; theme metrics include every pixel.
-  status.battery.glyphWidth -= 2;
-  status.battery.glyphPainter = drawHeaderBattery;
+  if (UiHighDpiProfile::active()) {
+    status.battery.glyphWidth -= 2;
+    status.battery.glyphPainter = drawHeaderBattery;
+  }
 #endif
   status.battery.gap = batteryPercentSpacing;
   status.batteryLeft = metrics.headerBatterySide == 1;
@@ -866,16 +883,16 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
 
   if (hasContinueReading && !recentBooks[0].coverBmpPath.empty()) {
     // Try to get actual image dimensions from BMP header
-    const std::string coverBmpPath =
-        UITheme::getCoverThumbPath(recentBooks[0].coverBmpPath, BaseMetrics::values.homeCoverHeight);
+    const std::string coverBmpPath = UITheme::getCoverThumbPath(
+        recentBooks[0].coverBmpPath, renderer.toNativeUiLength(BaseMetrics::values.homeCoverHeight));
 
     HalFile file;
     if (Storage.openFileForRead("HOME", coverBmpPath, file)) {
       Bitmap bitmap(file);
       if (bitmap.parseHeaders() == BmpReaderError::Ok) {
         hasCoverImage = true;
-        const int imgWidth = bitmap.getWidth();
-        const int imgHeight = bitmap.getHeight();
+        const int imgWidth = renderer.bitmapUiWidth(bitmap);
+        const int imgHeight = renderer.bitmapUiHeight(bitmap);
 
         // Calculate width based on aspect ratio, maintaining baseHeight
         if (imgWidth > 0 && imgHeight > 0) {
@@ -915,8 +932,8 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     // Only load from SD on first render, then use stored buffer
 
     if (hasContinueReading && !recentBooks[0].coverBmpPath.empty() && !coverRendered) {
-      const std::string coverBmpPath =
-          UITheme::getCoverThumbPath(recentBooks[0].coverBmpPath, BaseMetrics::values.homeCoverHeight);
+      const std::string coverBmpPath = UITheme::getCoverThumbPath(
+          recentBooks[0].coverBmpPath, renderer.toNativeUiLength(BaseMetrics::values.homeCoverHeight));
 
       // First time: load cover from SD and render
       HalFile file;
@@ -1332,18 +1349,18 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   }
 
   if (showStatusBarTextLane && bleinput::isConnected()) {
-    const int bluetoothGap = leftClusterWidth > 0 ? bookmarkStatusIconGap : 0;
+    const int bluetoothGap = leftClusterWidth > 0 ? (UiHighDpiProfile::active() ? bookmarkStatusIconGap : 4) : 0;
     drawBluetoothStatusIcon(renderer, leftClusterX + leftClusterWidth + bluetoothGap, textY + 3);
-    leftClusterWidth += bluetoothStatusIconWidth + bluetoothGap;
+    leftClusterWidth += (UiHighDpiProfile::active() ? bluetoothStatusIconWidth : 16) + bluetoothGap;
   }
 
   // Draw Bookmark
   if (showStatusBarTextLane && isPageBookmarked) {
-    const int bookmarkGap = leftClusterWidth > 0 ? bookmarkStatusIconGap : 0;
+    const int bookmarkGap = leftClusterWidth > 0 ? (UiHighDpiProfile::active() ? bookmarkStatusIconGap : 4) : 0;
     const int bookmarkX = leftClusterX + leftClusterWidth + bookmarkGap;
     const int bookmarkY = textY + 5;
     drawBookmarkStatusIcon(renderer, bookmarkX, bookmarkY);
-    leftClusterWidth += bookmarkStatusIconWidth + bookmarkGap;
+    leftClusterWidth += (UiHighDpiProfile::active() ? bookmarkStatusIconWidth : 16) + bookmarkGap;
   }
 
   // Draw Title
@@ -1369,7 +1386,7 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
       availableTitleSpace = rendererableScreenWidth - titleMarginLeft - titleMarginRight;
       titleMarginLeftAdjusted = titleMarginLeft;
     }
-    if (UiHighDpiProfile::enabled && availableTitleSpace <= 0) return;
+    if (UiHighDpiProfile::active() && availableTitleSpace <= 0) return;
     if (titleWidth > availableTitleSpace) {
       title = renderer.truncatedText(textFontId, title.c_str(), availableTitleSpace);
       titleWidth = renderer.getTextWidth(textFontId, title.c_str());
