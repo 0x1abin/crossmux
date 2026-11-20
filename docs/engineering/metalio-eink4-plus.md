@@ -87,3 +87,20 @@ user confirmed the volume opened in Finder.
 The post-runtime NVS passed the ESP-IDF integrity check. The active records
 changed in `freeink-hid`, `nimble_bond` and `cptime`. NVS page 0 matched
 the pre-write snapshot. Sleep current has yet to be measured.
+
+## Earlier S31 probes and factory recovery
+
+[ar0c's BSP probe PR #465](https://github.com/0x1abin/crossmux/pull/465)
+is a separate bring-up path. See the
+[pinned probe](https://github.com/ar0c/crossmux/blob/a43d02ff799ed330a47cd3606ec9485400f7c8fb/src/debug/MetalioEink4PlusPlatform.cpp)
+and [trial and recovery notes](https://github.com/ar0c/crossmux/blob/a43d02ff799ed330a47cd3606ec9485400f7c8fb/docs/engineering/metalio-eink4-plus.md).
+The full-reader trial was on a separate contributor branch, not the probe PR.
+That reader booted with 16 MiB PSRAM, but the display showed horizontal bands.
+Restoring the verified full 16 MiB factory backup cleared the bands and restored
+touch on stock firmware 2.0.79.
+
+The stock 5 MiB app slots do not fit the current development app. The probe,
+bench layout and restore evidence are historical references, not first-install
+instructions or acceptance of the current EPDiy build. The probe's 4-bit SDMMC
+assumption does not override the current 1-bit configuration. Track public
+installer and recovery validation in [#333](https://github.com/0x1abin/crossmux/issues/333).
