@@ -129,7 +129,7 @@ new_skip = (
 )
 if old_skip in source:
     espidf.write_text(source.replace(old_skip, new_skip, 1), encoding="utf-8")
-elif new_skip not in source:
+elif new_skip not in source and 'if not hasattr(node, "srcnode"):' not in source:
     raise RuntimeError("Unsupported pioarduino src-filter callback")
 
 # The hybrid pass clears BUILD_FLAGS before building the project libraries.
