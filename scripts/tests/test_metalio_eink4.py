@@ -4,6 +4,8 @@ import subprocess
 import tempfile
 import unittest
 
+from test_reading_ui_regressions import method
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SDK = ROOT / "freeink-sdk/libs/hardware"
 
@@ -15,8 +17,7 @@ class MetalioTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             tmp = pathlib.Path(directory)
             renderer = (ROOT / "lib/GfxRenderer/GfxRenderer.cpp").read_text()
-            start = renderer.index("void GfxRenderer::tapToLogical(")
-            transform = renderer[start:renderer.index("\n}", start) + 2]
+            header = (ROOT / "lib/GfxRenderer/GfxRenderer.h").read_text()
             source = r'''
 #include <cassert>
 #include <climits>
@@ -28,9 +29,12 @@ class GfxRenderer {
  enum Orientation { Portrait, LandscapeClockwise, PortraitInverted, LandscapeCounterClockwise };
  Orientation orientation=Portrait;
  int panelWidth=800, panelHeight=480;
+ bool scaled=false;
+ bool isScalingUi() const {return scaled;}
+''' + method(header, "static constexpr int scaledUiHit(") + r'''
  void tapToLogical(float,float,int&,int&) const;
 };
-TRANSFORM
+''' + method(renderer, "void GfxRenderer::tapToLogical(") + r'''
 using Region=freeink::Cst816sRegion;
 freeink::Cst816sFrame frame(unsigned x,unsigned y,unsigned count=1) {
  uint8_t b[]={static_cast<uint8_t>(count),static_cast<uint8_t>(x>>8),static_cast<uint8_t>(x),
@@ -59,8 +63,12 @@ int main() {
    for (int i=0;i<4;++i) {
      renderer.orientation=static_cast<GfxRenderer::Orientation>(i);
      int lx,ly;
-     renderer.tapToLogical(float(p.x)/799,float(p.y)/479,lx,ly);
-     assert(lx==expected[i][0] && ly==expected[i][1]);
+     for (bool scaled : {false,true}) {
+       renderer.scaled=scaled;
+       renderer.tapToLogical(float(p.x)/799,float(p.y)/479,lx,ly);
+       assert(lx==(scaled?2*expected[i][0]/3:expected[i][0]));
+       assert(ly==(scaled?2*expected[i][1]/3:expected[i][1]));
+     }
    }
  }
  freeink::Cst816sContact contact;
@@ -83,7 +91,7 @@ int main() {
 
 }
 '''
-            (tmp / "check.cpp").write_text(source.replace("TRANSFORM", transform))
+            (tmp / "check.cpp").write_text(source)
             subprocess.run(["c++", "-std=c++20", "-I" + str(SDK / "InputManager/include"),
                             str(tmp / "check.cpp"), "-o", str(tmp / "check")], check=True)
             subprocess.run([str(tmp / "check")], check=True)
