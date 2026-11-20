@@ -42,11 +42,11 @@ class UITheme {
   static bool supportsCoverGrid();
   static bool hasCoverGridHome();
   static void drawCoverGridHome(CoverGridHomeUi& home);
-  void reload();
+  void reload(GfxRenderer& renderer);
   void setTheme(CrossPointSettings::UI_THEME type);
   static int getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader, bool hasTabBar, bool hasButtonHints,
                                      bool hasSubtitle, int extraReservedHeight = 0);
-  static std::string getCoverThumbPath(std::string coverBmpPath, int coverHeight);
+  static std::string getCoverThumbPath(std::string coverBmpPath, int pixelHeight);
   static UIIcon getFileIcon(const std::string& filename);
   static int getStatusBarHeight();
   static int getStatusBarTextTopPadding(const GfxRenderer& renderer);

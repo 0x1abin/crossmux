@@ -35,6 +35,7 @@
 | Murphy M4 | ESP32-S3 | Nightly |
 | Waveshare ePaper 3.97 | ESP32-S3 | Nightly |
 | [Metalio E-Ink 4](./docs/engineering/metalio-eink4.md) | ESP32-S3 | Stable, Nightly |
+| [Metalio E-Ink4-Plus](./docs/engineering/metalio-eink4-plus.md) | ESP32-S31 | Development; hardware acceptance pending |
 | [Read Pico (小纸 Pico)](./docs/engineering/read-pico.md) | ESP32-S3 | Nightly |
 
 Stable publishes only X3/X4, Sticky, X4 Pro and Metalio E-Ink 4. All nine targets publish Nightly. Local Stable build modes do not grant release eligibility; availability follows the selected regional catalog. This configuration does not establish hardware acceptance. Each S3 target needs its own image. X4 Classic (`x4c`), [LilyGo T5 S3 4.7 PRO/Lite](./docs/engineering/lilygo-t5s3.md) (`lilygo_t5s3`), and BOOX Picco (`picco`) remain development-only. See [device variants](./docs/engineering/device-variants.md) for target-specific limitations.
@@ -84,7 +85,7 @@ pio run -e gh_release
 pio run -e gh_release -t upload
 ```
 
-The application binary is `.pio/build/<environment>/firmware.bin`. The committed configuration has 36 build entries: local Dev, Stable and Nightly modes for nine hardware targets, three development-only boards and six simulators. Only the four targets listed above are eligible for Stable publication. Versions and Git hashes are generated automatically: Stable `<base>`, Nightly `<base>-rc+<sha7>`, Dev `<base>-dev-<branch>-<sha7>`. For other boards, see [build-system.md](./docs/engineering/build-system.md).
+The application binary is `.pio/build/<environment>/firmware.bin`. The committed configuration has 37 build entries: local Dev, Stable and Nightly modes for nine hardware targets, four development-only boards and six simulators. Only the four targets listed above are eligible for Stable publication. Versions and Git hashes are generated automatically: Stable `<base>`, Nightly `<base>-rc+<sha7>`, Dev `<base>-dev-<branch>-<sha7>`. For other boards, see [build-system.md](./docs/engineering/build-system.md).
 
 For X4 Pro and Metalio E-Ink 4:
 
@@ -101,6 +102,14 @@ pio run -e metalio_eink4_nightly
 ```
 
 The Stable ZIPs are `crossmux-<version>-x4pro.zip` and `crossmux-<version>-metalio-eink4.zip`. First installation also requires the matching bootloader and partition layout; use the complete installation package and the device guide.
+
+For Metalio E-Ink4-Plus (ESP32-S31), use PlatformIO Core 6.2+ and its isolated Arduino 4 / ESP-IDF 6.1 toolchain:
+
+```sh
+PLATFORMIO_CORE_DIR=/tmp/crossmux-s31-pio PLATFORMIO_BUILD_DIR=.pio/build-s31 pio run -e metalio_eink4_plus
+```
+
+The 1216×684 UI shares Read Pico's high-density layout. The 8-bit parallel display driver exposes native sixteen-level output. This is a development target; see the [device guide](./docs/engineering/metalio-eink4-plus.md) for SDK dependency reproduction, first-flash backup requirements and pending physical checks.
 
 For Read Pico (小纸 Pico):
 

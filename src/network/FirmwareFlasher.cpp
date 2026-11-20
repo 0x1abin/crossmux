@@ -1,11 +1,11 @@
 #include "FirmwareFlasher.h"
 
 #include <Arduino.h>
+#include <HalSha256.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
-#include <mbedtls/sha256.h>
 #include <spi_flash_mmap.h>
 
 #include <algorithm>
@@ -90,14 +90,14 @@ namespace {
 // Stream `length` bytes from `file` starting at the current read offset, feeding them through
 // both the XOR-checksum and SHA256 accumulators. Used by validateImageFile so the whole image
 // is verified end-to-end without holding it in RAM (ESP32-C3 only has ~380 KB).
-Result feedHashAndChecksum(HalFile& file, size_t length, uint8_t* xorAccum, mbedtls_sha256_context* sha, uint8_t* buf,
+Result feedHashAndChecksum(HalFile& file, size_t length, uint8_t* xorAccum, HalSha256* sha, uint8_t* buf,
                            board_tag::Scanner* tagScanner) {
   size_t remaining = length;
   while (remaining > 0) {
     const size_t want = std::min<size_t>(CHUNK, remaining);
     const int got = file.read(buf, want);
     if (got <= 0 || static_cast<size_t>(got) != want) return Result::READ_FAIL;
-    if (sha) mbedtls_sha256_update(sha, buf, want);
+    if (sha && !sha->update(buf, want)) return Result::BAD_SHA;
     if (tagScanner) tagScanner->feed(buf, want);
     if (xorAccum) {
       uint8_t acc = *xorAccum;
@@ -160,10 +160,8 @@ Result validateImageFile(const char* sdPath, size_t partitionSize) {
     return Result::OOM;
   }
 
-  mbedtls_sha256_context shaCtx;
-  mbedtls_sha256_init(&shaCtx);
-  mbedtls_sha256_starts(&shaCtx, /*is224=*/0);
-  mbedtls_sha256_update(&shaCtx, header, HEADER_SIZE);
+  HalSha256 shaCtx;
+  if (!shaCtx.update(header, HEADER_SIZE)) return Result::BAD_SHA;
 
   uint8_t xorAccum = CHECKSUM_SEED;
   size_t pos = HEADER_SIZE;
@@ -175,17 +173,15 @@ Result validateImageFile(const char* sdPath, size_t partitionSize) {
   for (uint8_t i = 0; i < segCount; i++) {
     if (pos + SEG_HEADER_SIZE > fileSize) {
       LOG_ERR("FLASH", "validate: seg %u header overruns EOF at %u", i, static_cast<unsigned>(pos));
-      mbedtls_sha256_free(&shaCtx);
       file.close();
       return Result::BAD_SEGMENTS;
     }
     uint8_t segHdr[SEG_HEADER_SIZE];
     if (file.read(segHdr, SEG_HEADER_SIZE) != static_cast<int>(SEG_HEADER_SIZE)) {
-      mbedtls_sha256_free(&shaCtx);
       file.close();
       return Result::READ_FAIL;
     }
-    mbedtls_sha256_update(&shaCtx, segHdr, SEG_HEADER_SIZE);
+    if (!shaCtx.update(segHdr, SEG_HEADER_SIZE)) return Result::BAD_SHA;
     pos += SEG_HEADER_SIZE;
 
     uint32_t dataLen;
@@ -193,14 +189,12 @@ Result validateImageFile(const char* sdPath, size_t partitionSize) {
     if (pos + dataLen > fileSize) {
       LOG_ERR("FLASH", "validate: seg %u data overruns EOF (%u + %u > %u)", i, static_cast<unsigned>(pos),
               static_cast<unsigned>(dataLen), static_cast<unsigned>(fileSize));
-      mbedtls_sha256_free(&shaCtx);
       file.close();
       return Result::BAD_SEGMENTS;
     }
 
     const Result feedRes = feedHashAndChecksum(file, dataLen, &xorAccum, &shaCtx, buf.get(), &tagScanner);
     if (feedRes != Result::OK) {
-      mbedtls_sha256_free(&shaCtx);
       file.close();
       return feedRes;
     }
@@ -210,7 +204,6 @@ Result validateImageFile(const char* sdPath, size_t partitionSize) {
   if (tagScanner.mismatch()) {
     LOG_ERR("FLASH", "validate: wrong board: image=%s device=%.*s", tagScanner.foundName(),
             static_cast<int>(board_tag::boardNameLen()), board_tag::boardName());
-    mbedtls_sha256_free(&shaCtx);
     file.close();
     return Result::WRONG_BOARD;
   }
@@ -222,7 +215,6 @@ Result validateImageFile(const char* sdPath, size_t partitionSize) {
     LOG_ERR("FLASH", "validate: size mismatch body+pad=%u sha=%u expected=%u actual=%u", static_cast<unsigned>(padEnd),
             static_cast<unsigned>(hashAppended ? SHA_TRAILER : 0), static_cast<unsigned>(expectedTotal),
             static_cast<unsigned>(fileSize));
-    mbedtls_sha256_free(&shaCtx);
     file.close();
     return Result::BAD_SIZE;
   }
@@ -231,43 +223,37 @@ Result validateImageFile(const char* sdPath, size_t partitionSize) {
   const size_t padLen = padEnd - pos;
   uint8_t padBuf[16];
   if (padLen > sizeof(padBuf)) {
-    mbedtls_sha256_free(&shaCtx);
     file.close();
     return Result::BAD_SIZE;
   }
   if (padLen > 0 && file.read(padBuf, padLen) != static_cast<int>(padLen)) {
-    mbedtls_sha256_free(&shaCtx);
     file.close();
     return Result::READ_FAIL;
   }
-  mbedtls_sha256_update(&shaCtx, padBuf, padLen);
+  if (!shaCtx.update(padBuf, padLen)) return Result::BAD_SHA;
 
   const uint8_t storedChecksum = padBuf[padLen - 1];
   if ((xorAccum & 0xFF) != storedChecksum) {
     LOG_ERR("FLASH", "validate: checksum mismatch computed=0x%02X stored=0x%02X", xorAccum, storedChecksum);
-    mbedtls_sha256_free(&shaCtx);
     file.close();
     return Result::BAD_CHECKSUM;
   }
 
   if (hashAppended) {
     uint8_t computed[SHA_TRAILER];
-    mbedtls_sha256_finish(&shaCtx, computed);
+    if (!shaCtx.finish(computed)) return Result::BAD_SHA;
     uint8_t stored[SHA_TRAILER];
     if (file.read(stored, SHA_TRAILER) != static_cast<int>(SHA_TRAILER)) {
-      mbedtls_sha256_free(&shaCtx);
       file.close();
       return Result::READ_FAIL;
     }
     if (std::memcmp(computed, stored, SHA_TRAILER) != 0) {
       LOG_ERR("FLASH", "validate: SHA256 mismatch");
-      mbedtls_sha256_free(&shaCtx);
       file.close();
       return Result::BAD_SHA;
     }
   }
 
-  mbedtls_sha256_free(&shaCtx);
   file.close();
   return Result::OK;
 }

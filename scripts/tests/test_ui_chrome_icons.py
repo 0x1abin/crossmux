@@ -236,6 +236,7 @@ int main() {
         layout_source = (ROOT / 'src/components/UITheme.cpp').read_text()
         run_cpp(r'''
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -275,6 +276,8 @@ struct GfxRenderer {
  enum Orientation { Portrait, LandscapeClockwise, PortraitInverted, LandscapeCounterClockwise };
  Orientation orientation=Portrait;
  Orientation getOrientation() const {return orientation;}
+ bool isScalingUi() const {return false;}
+ std::array<int,2> getAsciiTextInkY(int,const char*) const {return {};}
  const std::map<int,Font>& getFontMap() const {static const std::map<int,Font> fonts;return fonts;}
  int getFontAscenderSize(int) const {return 34;}
  int width=684,height=1216,top=5,right=5,bottom=8,left=5;
@@ -368,6 +371,7 @@ int main() {
 
     def test_reader_content_reclaims_footer_padding_without_moving_text(self):
         layout_source = (ROOT / 'src/components/UITheme.cpp').read_text()
+        renderer_header = (ROOT / 'lib/GfxRenderer/GfxRenderer.h').read_text()
         reader_source = (ROOT / 'src/activities/reader/EpubReaderActivity.cpp').read_text()
         render = method(reader_source, 'void EpubReaderActivity::renderBook(')
         start = render.index('  int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;')
@@ -377,7 +381,7 @@ int main() {
 #include <cassert>
 #include <cstdint>
 #include <initializer_list>
-constexpr int READER_STATUS_FONT_ID=1, SMALL_FONT_ID=2;
+enum { READER_STATUS_FONT_ID=1, SMALL_FONT_ID=2 };
 struct BaseTheme { static constexpr int STATUS_NUMERIC_FONT_ID=3; };
 struct Metrics { int statusBarVerticalMargin=UiHighDpiProfile::enabled?48:19, progressBarMarginTop=1; };
 using ThemeMetrics=Metrics;
@@ -394,6 +398,10 @@ struct Settings {
 struct GfxRenderer {
  int width=684,height=1216,top=5,right=5,bottom=8,left=5;
  int textHeight=34, numericHeight=34;
+ bool proportional=false;
+ bool usesProportionalUi() const {return proportional;}
+''' + method(renderer_header, 'static constexpr int scaledUiEdge(') + '\n' + method(
+    renderer_header, 'int toNativeUiLength(') + r'''
  int getLineHeight(int font) const {return font==BaseTheme::STATUS_NUMERIC_FONT_ID?numericHeight:textHeight;}
  void getOrientedViewableTRBL(int* t,int* r,int* b,int* l) const {*t=top;*r=right;*b=bottom;*l=left;}
 };
@@ -418,6 +426,7 @@ int main() {
  for (bool text : {false,true}) for (bool progress : {false,true})
  for (bool automatic : {false,true}) for (uint8_t margin : {0,25,100}) {
    GfxRenderer r; UITheme::inx=inx;
+   r.proportional=UiHighDpiProfile::enabled && !inx;
    if(orientation%2) {r.width=1216;r.height=684;}
    if(orientation==1) {r.right=8;r.bottom=5;}
    if(orientation==2) {r.top=8;r.bottom=5;}
@@ -430,7 +439,8 @@ int main() {
    const int oldBottom=r.height-r.bottom-std::max<int>(margin,oldReserve);
    const int bottom=contentBottom(r,automatic);
    if(!inx) {
-     assert(bottom==r.height-r.bottom-margin-oldReserve);
+     const int nativeReserve=r.proportional?(3*oldReserve+1)/2:oldReserve;
+     assert(bottom==r.height-r.bottom-margin-nativeReserve);
      continue;
    }
    assert(bottom>=oldBottom);

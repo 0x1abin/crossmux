@@ -184,6 +184,19 @@ freeink::MurphyM4Batch loadMurphyM4Batch() {
 }  // namespace
 
 void HalGPIO::begin() {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  if (!freeink::metalioplus::ensureBooted()) {
+    LOG_ERR("HW", "Metalio Plus expander initialization failed");
+  } else if (esp_reset_reason() == ESP_RST_DEEPSLEEP && !freeink::metalioplus::powerKeyHeld()) {
+    // The expander shares INT with volume keys and the IMU.
+    constexpr auto wakePin = freeink::metalioplus::EXPANDER_INT_GPIO;
+    if (esp_sleep_is_valid_wakeup_gpio(wakePin) && freeink::metalioplus::prepareKeyWake()) {
+      freeink::PowerManager::armWakeOnPins(1ULL << wakePin);
+      freeink::PowerManager::deepSleep();
+    }
+    freeink::metalioplus::waitForPowerKeyThenRestart();
+  }
+#endif
 #if FREEINK_MCU_C3
   _deviceType = detectDeviceTypeWithFingerprint();
   BoardConfig::selectDevice(deviceIsX3() ? BoardConfig::Board::XteinkX3 : BoardConfig::Board::XteinkX4);
@@ -248,6 +261,9 @@ void HalGPIO::begin() {
   if (!BoardT5S3::pca9535Present()) LOG_ERR("HW", "LilyGo board bring-up failed: expander did not answer");
 #endif
   inputMgr.begin();
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  if (!inputMgr.beginBufferedTouch()) LOG_ERR("GPIO", "Touch sampler unavailable; using main-loop polling");
+#endif
   inputBegun = true;
 }
 
@@ -473,7 +489,8 @@ bool HalGPIO::coldBootImpliesPowerButton() const {
   // EEGO A4 misread them the same way once the charger terminates at 100%
   // (STAT inactive reads as "no USB").
   // The Metalio sleeps powered off and only its button turns it back on.
-  return isXteinkDevice() || BoardConfig::isPaperMono() || BoardConfig::isSticky() || BoardConfig::isMetalioEInk4();
+  return isXteinkDevice() || BoardConfig::isPaperMono() || BoardConfig::isSticky() || BoardConfig::isMetalioEInk4() ||
+         BoardConfig::isMetalioEInk4Plus();
 }
 
 HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {
@@ -486,6 +503,9 @@ HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {
       (wakeupCause == ESP_SLEEP_WAKEUP_GPIO || wakeupCause == ESP_SLEEP_WAKEUP_EXT1)) {
     return WakeupReason::PowerButton;
   }
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  if (wakeupCause == ESP_SLEEP_WAKEUP_UNDEFINED && resetReason == ESP_RST_POWERON) return WakeupReason::PowerButton;
+#endif
   if (wakeupCause == ESP_SLEEP_WAKEUP_UNDEFINED && resetReason == ESP_RST_POWERON && !usbConnected &&
       coldBootImpliesPowerButton()) {
     return WakeupReason::PowerButton;

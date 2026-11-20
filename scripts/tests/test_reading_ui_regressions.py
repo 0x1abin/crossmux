@@ -26,7 +26,11 @@ def run_cpp(program, include_dirs=(), defines=(), extra_sources=()):
     with tempfile.TemporaryDirectory(prefix='reading-ui-') as directory:
         cpp = Path(directory) / 'check.cpp'
         exe = Path(directory) / 'check'
-        cpp.write_text(f'#include "{ROOT}/src/components/UiHighDpiProfile.h"\n' + program)
+        profile = f'#include "{ROOT}/src/components/UiHighDpiProfile.h"\n'
+        if 'CROSSMUX_UI_PROFILE_HIGH_DPI' in defines:
+            profile += ('namespace UiHighDpiProfile {bool testNativeLayout=true; '
+                        'bool active(){return testNativeLayout;}}\n')
+        cpp.write_text(profile + program)
         subprocess.run(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
                         *('-I'+str(path) for path in include_dirs), *('-D'+define for define in defines), str(cpp), *map(str, extra_sources), '-o', str(exe)], check=True)
         subprocess.run([str(exe)], check=True)
@@ -43,13 +47,15 @@ class ReadingUiRegressionTest(unittest.TestCase):
 #include <utility>
 bool cacheExists=true, cacheEmpty=true;
 int generations=0;
+constexpr int physicalHeight=339;
 namespace FsHelpers {
 bool hasReflowableBookExtension(const std::string& path) {return path.ends_with(".epub");}
 bool hasXtcExtension(const std::string& path) {return path.ends_with(".xtc");}
 }
 namespace BookCoverLoader {
 enum class CachedCoverState {Missing, Ready, Terminal};
-CachedCoverState checkCachedCover(const std::string&, bool emptyIsTerminal) {
+CachedCoverState checkCachedCover(const std::string& path, bool emptyIsTerminal) {
+ assert(path.ends_with("_"+std::to_string(physicalHeight)+".bmp"));
  if(!cacheExists) return CachedCoverState::Missing;
  if(!cacheEmpty) return CachedCoverState::Ready;
  if(emptyIsTerminal) return CachedCoverState::Terminal;
@@ -61,21 +67,25 @@ bool generate() {++generations; cacheExists=true; cacheEmpty=false; return true;
 struct Epub {
  Epub(const std::string&,const char*) {}
  std::string getThumbBmpPath(int height=-1) {return "/epub_"+(height<0?std::string("[HEIGHT]"):std::to_string(height))+".bmp";}
- bool generateThumbBmpFromSource(int) {return generate();}
+ bool generateThumbBmpFromSource(int height) {assert(height==physicalHeight);return generate();}
 };
 struct Xtc {
  Xtc(const std::string&,const char*) {}
  std::string getThumbBmpPath(int height=-1) {return "/xtc_"+(height<0?std::string("[HEIGHT]"):std::to_string(height))+".bmp";}
  bool load() {return true;}
- bool generateThumbBmp(int) {return generate();}
+ bool generateThumbBmp(int height) {assert(height==physicalHeight);return generate();}
 };
 template<class T, class... Args> auto makeUniqueNoThrow(Args&&... args) {
  return std::make_unique<T>(std::forward<Args>(args)...);
 }
 struct Rect {};
 struct RecentBook {std::string path,coverBmpPath;};
+struct GfxRenderer {
+ int toNativeUiLength(int px) const {return (3*px+1)/2;}
+ operator int() const {return 0;}
+};
 struct UITheme {static std::string getCoverThumbPath(std::string,int);};
-struct HomeActivity {int renderer=0;void loadGridCover(RecentBook&,int,bool&,Rect&);};
+struct HomeActivity {GfxRenderer renderer;void loadGridCover(RecentBook&,int,bool&,Rect&);};
 struct {Rect drawPopup(int,const char*) {return {};};void fillPopupProgress(int,Rect&,int) {}} GUI;
 constexpr int STR_LOADING_POPUP=0;
 const char* tr(int) {return "Loading";}
@@ -317,6 +327,7 @@ int main() {
 
     def test_splash_uses_font_heights_and_keeps_version_inside_safe_area(self):
         source = (ROOT / 'src/components/themes/BaseTheme.cpp').read_text()
+        boot = (ROOT / 'src/activities/boot_sleep/BootActivity.cpp').read_text()
         program = r'''
 #include <cassert>
 #include <cstring>
@@ -325,17 +336,27 @@ int main() {
 struct Rect { int x,y,width,height; };
 constexpr int UI_12_FONT_ID=1, UI_10_FONT_ID=2, SMALL_FONT_ID=3;
 namespace EpdFontFamily { enum Style { REGULAR, BOLD }; }
-constexpr int STR_CROSSPOINT=0;
-const char* tr(int) {return "CrossMux";}
+constexpr int STR_CROSSPOINT=0, STR_BOOTING=1;
+const char* tr(int id) {return id==STR_CROSSPOINT ? "CrossMux" : "Booting...";}
+const char* CROSSPOINT_VERSION;
 const unsigned char Logo120[1]{};
 struct GfxRenderer {
  Rect safe; int width=684,height=1216,titleHeight=46,statusHeight=40,smallHeight=34;
+ mutable bool scaled=false;
+ int refreshes=0;
  mutable std::vector<Rect> blocks;
+ struct PixelScope {
+   const GfxRenderer& renderer; bool previous;
+   explicit PixelScope(const GfxRenderer& r): renderer(r),previous(r.scaled) {r.scaled=false;}
+   ~PixelScope(){renderer.scaled=previous;}
+ };
+ void displayBuffer() {++refreshes;}
+ bool isScalingUi() const {return scaled;}
  int getScreenWidth() const {return width;}
  int getScreenHeight() const {return height;}
  int getLineHeight(int font) const {return font==1?titleHeight:font==2?statusHeight:smallHeight;}
  void clearScreen() const {blocks.clear();}
- void drawImage(const unsigned char*,int x,int y,int w,int h) const {blocks.push_back({x,y,w,h});}
+ void drawImage(const unsigned char*,int x,int y,int w,int h) const {assert(!scaled);blocks.push_back({x,y,w,h});}
  void drawCenteredText(int font,int y,const char* text,bool=true,EpdFontFamily::Style=EpdFontFamily::REGULAR) const {
    int width=std::strlen(text)*14;
    blocks.push_back({(getScreenWidth()-width)/2,y,width,getLineHeight(font)});
@@ -351,11 +372,14 @@ struct UITheme {
  }
 };
 struct BaseTheme {static void drawSplash(const GfxRenderer&,const char*,const char*);};
-''' + method(source, 'void BaseTheme::drawSplash(') + r'''
+BaseTheme GUI;
+struct BootActivity {GfxRenderer& renderer; void renderSplash();};
+''' + method(source, 'void BaseTheme::drawSplash(') + method(boot, 'void BootActivity::renderSplash(') + r'''
 int main() {
  for(Rect size : {Rect{0,0,684,1216},Rect{0,0,600,1000}})
  for(int orientation=0;orientation<4;++orientation)
- for(int extra : {0,12}) for(const char* status : {"Booting...","Sleeping..."})
+ for(int extra : {0,12}) for(bool proportionalTheme : {false,true})
+ for(const char* status : {"Booting...","Sleeping..."})
  for(const char* version : std::initializer_list<const char*>{nullptr,"1.6.5-readpico-rc+abcdef123456"}) {
    GfxRenderer r;
    r.width=orientation%2?size.height:size.width;
@@ -364,7 +388,19 @@ int main() {
    Rect safe{left,top,r.width-left-right,r.height-top-bottom};
    r.safe=safe;
    r.titleHeight+=extra; r.statusHeight+=extra; r.smallHeight+=extra;
-   BaseTheme{}.drawSplash(r,status,version);
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+   UiHighDpiProfile::testNativeLayout=!proportionalTheme;
+#endif
+   const bool proportional=UiHighDpiProfile::enabled && proportionalTheme;
+   r.scaled=proportional;
+   CROSSPOINT_VERSION=version;
+   if(std::strcmp(status,"Booting...")==0) {
+     BootActivity{r}.renderSplash();
+     assert(r.refreshes==1 && r.scaled==proportional);
+   } else {
+     GUI.drawSplash(r,status,version);
+     assert(r.scaled==proportional);
+   }
    assert(r.blocks.size()==(version?4:3));
    if(UiHighDpiProfile::enabled) {
      for(auto rect : r.blocks) {
@@ -1263,6 +1299,10 @@ struct GfxRenderer {
   static constexpr int VIEWABLE_MARGIN_TOP=9, VIEWABLE_MARGIN_RIGHT=3,
                        VIEWABLE_MARGIN_BOTTOM=3, VIEWABLE_MARGIN_LEFT=3;
   Orientation getOrientation() const { return orientation; }
+  bool isScalingUi() const { return false; }
+  static int scaledUiLength(int px) { return px; }
+  static int scaledUiHit(int px) { return px; }
+  struct PixelScope { explicit PixelScope(const GfxRenderer&) {} };
   bool portrait() const { return orientation==Portrait || orientation==PortraitInverted; }
   int getScreenWidth() const { return portrait() ? 684 : 1216; }
   int getScreenHeight() const { return portrait() ? 1216 : 684; }

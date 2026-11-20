@@ -176,15 +176,17 @@ void HalPowerManager::begin() {
   // Board charger setup (Picco SGM41562: stock charge voltage and limits); a
   // no-op on boards without a configurable charger.
   if (BatteryMonitor::configureCharger()) LOG_INF("PWR", "Charger configured");
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  if (!setCpuFrequencyMhz(320)) LOG_ERR("PWR", "Could not set the 320 MHz EPDiy clock");
+#endif
   normalFreq = getCpuFrequencyMhz();
   modeMutex = xSemaphoreCreateMutex();
   assert(modeMutex != nullptr);
 }
 
 void HalPowerManager::setPowerSaving(bool enabled) {
-#if FREEINK_DEVICE_MURPHY_M4
-  // Hardware validation found FT6336U touch unreliable after runtime CPU clock
-  // changes. The main loop still uses its 50 ms idle delay on this target.
+#if FREEINK_DEVICE_MURPHY_M4 || FREEINK_DEVICE_METALIO_EINK4_PLUS
+  // Keep the S31 LCD feed stable and avoid changing clocks during background touch on Murphy.
   (void)enabled;
   return;
 #else
@@ -227,7 +229,8 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, const bool wakeOnHeldButton)
 #if FREEINK_DEVICE_WAVESHARE_EPAPER_397
   Waveshare397Power::waitForPowerButtonRelease();
 #endif
-#if defined(ENABLE_SERIAL_LOG) && !FREEINK_DEVICE_METALIO_EINK4 && !FREEINK_DEVICE_READPICO
+#if defined(ENABLE_SERIAL_LOG) && !FREEINK_DEVICE_METALIO_EINK4 && !FREEINK_DEVICE_READPICO && \
+    !FREEINK_DEVICE_METALIO_EINK4_PLUS
   // Tear down HWCDC so the host sees a clean disconnect and the peripheral
   // doesn't hold power domains that interfere with USB-powered GPIO wake.
   // logSerial is the raw HWCDC reference; Serial is the MySerialImpl proxy
@@ -283,7 +286,16 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, const bool wakeOnHeldButton)
   // deep-sleep command while its rail is still up (enterDeepSleep() in main.cpp
   // guarantees that ordering).
   gpio.prepareForDeepSleep();
-#if FREEINK_DEVICE_METALIO_EINK4
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  Frontlight.setOn(false);
+  freeink::metalioplus::powerOff();
+  constexpr auto wakePin = freeink::metalioplus::EXPANDER_INT_GPIO;
+  if (esp_sleep_is_valid_wakeup_gpio(wakePin) && freeink::metalioplus::prepareKeyWake()) {
+    freeink::PowerManager::armWakeOnPins(1ULL << wakePin);
+    freeink::PowerManager::deepSleep();
+  }
+  freeink::metalioplus::waitForPowerKeyThenRestart();
+#elif FREEINK_DEVICE_METALIO_EINK4
   // Keep USB diagnostics available if external power prevents the hardware cut.
   if (!freeink::metalio::powerOff()) LOG_ERR("PWR", "Metalio shutdown pulse failed; falling back to deep sleep");
   freeink::PowerManager::deepSleepUntilPowerButton();

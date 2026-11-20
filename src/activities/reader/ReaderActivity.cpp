@@ -349,6 +349,7 @@ void ReaderActivity::render(RenderLock&&) {
       markPageRendered();
     }
   } else {
+    const GfxRenderer::PixelScope physical(renderer);
     renderBook();
   }
   if (renderCommitted) {

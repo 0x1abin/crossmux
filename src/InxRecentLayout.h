@@ -25,7 +25,7 @@ inline Rect contentRect(const Rect& safeArea, const ThemeMetrics& metrics) {
 }
 
 inline Rect batteryRect(const Rect& safeArea) {
-#if FREEINK_DEVICE_READPICO
+#if FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS
   constexpr int bottomOffset = 24;
 #else
   constexpr int bottomOffset = 30;

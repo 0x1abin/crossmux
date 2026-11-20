@@ -138,6 +138,10 @@ class HalGPIO {
   unsigned long lastTouchHeldMs() const;
   bool wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEnd) const;
   bool wasTouchActivity() const;
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  void discardBufferedTouch() { inputMgr.discardBufferedTouch(); }
+  uint32_t touchFrameTime() const { return inputMgr.touchFrameTime(); }
+#endif
   // Drop the one-shot touch tap/release edge events. Call on activity
   // transitions so the incoming activity does not re-read a tap the outgoing
   // one consumed (InputManager clears these in update(), but a pushActivity

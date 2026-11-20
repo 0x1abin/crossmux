@@ -21,6 +21,12 @@
 #include "Memory.h"
 
 namespace {
+// Existing high-DPI faces supply 12/14/16 pt. The proportional UI uses them
+// at the 12/15/18 pt equivalent without adding another embedded font bank.
+constexpr int kGlyphScaleOne = 256;
+constexpr int scaleGlyphMetric(int value, int scale) {
+  return (value * scale + (value < 0 ? -128 : 128)) / kGlyphScaleOne;
+}
 // Synthesized small caps: lowercase letters draw as capitals at roughly x-height.
 constexpr int SMALL_CAPS_SCALE_NUM = 3;
 constexpr int SMALL_CAPS_SCALE_DEN = 4;
@@ -119,6 +125,20 @@ void appendShapedRtlTokens(const char* text, std::string& shapedOut) {
   }
 }
 }  // namespace
+
+#if defined(CROSSMUX_UI_PROFILE_HIGH_DPI)
+thread_local const GfxRenderer* GfxRenderer::nativePixels_ = nullptr;
+#endif
+
+int GfxRenderer::uiGlyphScale(const int fontId) const {
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+  if (fontId == compactUiFont_) return 274;
+  if (std::find(largeUiFonts_.begin(), largeUiFonts_.end(), fontId) != largeUiFonts_.end()) return 288;
+#else
+  (void)fontId;
+#endif
+  return kGlyphScaleOne;
+}
 
 const uint8_t* GfxRenderer::getGlyphBitmap(const EpdFontData* fontData, const EpdGlyph* glyph) const {
   // Vector (TTF) fonts: the glyph bitmap lives in the font's own cache, keyed by
@@ -856,6 +876,10 @@ void GfxRenderer::drawGlyphBitmap(const uint8_t* bitmap, const int width, const 
 // IMPORTANT: This function is in critical rendering path and is called for every pixel. Please keep it as simple and
 // efficient as possible.
 void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
+  if (isScalingUi()) {
+    fillRect(x, y, 1, 1, state);
+    return;
+  }
   if (x < clipLeft_ || y < clipTop_ || x >= clipRight_ || y >= clipBottom_) return;
   int phyX = 0;
   int phyY = 0;
@@ -947,7 +971,7 @@ int GfxRenderer::getTextWidth(const int fontId, const char* text, const EpdFontF
 
   int w = 0, h = 0;
   fontIt->second.getTextDimensions(renderedText, &w, &h, style);
-  return w;
+  return isScalingUi() ? scaledUiLength(scaleGlyphMetric(w, uiGlyphScale(fontId))) : w;
 }
 
 void GfxRenderer::drawCenteredText(const int fontId, const int y, const char* text, const bool black,
@@ -963,6 +987,13 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
   if (text == nullptr || *text == '\0') {
     return;
   }
+
+  const bool scaledUi = isScalingUi();
+  const int fontScale = scaledUi ? uiGlyphScale(fontId) : kGlyphScaleOne;
+  const int physicalX = scaledUi ? scaledUiEdge(x) : x;
+  const int physicalY = scaledUi ? scaledUiEdge(y) : y;
+  const PixelScope native(*this);
+  const auto fontX = [&](int advance) { return physicalX + scaleGlyphMetric(advance - x, fontScale); };
 
   const uint8_t activeSyntheticBoldPixels =
       syntheticBoldPixels != 0 && (style & EpdFontFamily::BOLD) != 0 ? syntheticBoldPixels : 0;
@@ -983,8 +1014,9 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
   const int resolvedFontId = resolveTextFontId(fontId, renderedText, renderStyle);
 #endif
 
-  int yPos = y + getFontAscenderSize(resolvedFontId);
-  if (resolvedFontId != fontId) yPos += (getLineHeight(fontId) - getLineHeight(resolvedFontId)) / 2;
+  int ascender = getFontAscenderSize(resolvedFontId);
+  if (resolvedFontId != fontId) ascender += (getLineHeight(fontId) - getLineHeight(resolvedFontId)) / 2;
+  const int yPos = physicalY + scaleGlyphMetric(ascender, fontScale);
   int lastBaseX = x;
   int lastBaseLeft = 0;
   int lastBaseWidth = 0;
@@ -1025,8 +1057,13 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
           combiningMark::raiseAboveBase(anchor, combiningGlyph->top, combiningGlyph->height, lastBaseTop);
       const int combiningX = combiningMark::anchorOver(anchor, lastBaseX, lastBaseLeft, lastBaseWidth,
                                                        combiningGlyph->left, combiningGlyph->width);
-      renderCharImpl<TextRotation::None>(*this, renderMode, font, cp, combiningX, yPos - raiseBy, black, renderStyle,
-                                         activeSyntheticBoldPixels);
+      if (fontScale == kGlyphScaleOne) {
+        renderCharImpl<TextRotation::None>(*this, renderMode, font, cp, fontX(combiningX), yPos - raiseBy, black,
+                                           renderStyle, activeSyntheticBoldPixels);
+      } else {
+        renderCharScaled(*this, renderMode, font, cp, fontX(combiningX), yPos - scaleGlyphMetric(raiseBy, fontScale),
+                         black, renderStyle, fontScale, kGlyphScaleOne, activeSyntheticBoldPixels);
+      }
       continue;
     }
 
@@ -1077,13 +1114,17 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
 
     if (isSupSub) {
       // yPos already carries the vertical offset applied by TextBlock::render().
-      renderCharScaled(*this, renderMode, font, cp, lastBaseX, yPos, black, renderStyle, 1, 2,
-                       activeSyntheticBoldPixels);
+      renderCharScaled(*this, renderMode, font, cp, fontX(lastBaseX), yPos, black, renderStyle, fontScale,
+                       2 * kGlyphScaleOne, activeSyntheticBoldPixels);
     } else if (isSmallCap) {
-      renderCharScaled(*this, renderMode, font, cp, lastBaseX, yPos, black, style, SMALL_CAPS_SCALE_NUM,
-                       SMALL_CAPS_SCALE_DEN, activeSyntheticBoldPixels);
+      renderCharScaled(*this, renderMode, font, cp, fontX(lastBaseX), yPos, black, style,
+                       SMALL_CAPS_SCALE_NUM * fontScale, SMALL_CAPS_SCALE_DEN * kGlyphScaleOne,
+                       activeSyntheticBoldPixels);
+    } else if (fontScale != kGlyphScaleOne) {
+      renderCharScaled(*this, renderMode, font, cp, fontX(lastBaseX), yPos, black, renderStyle, fontScale,
+                       kGlyphScaleOne, activeSyntheticBoldPixels);
     } else {
-      renderCharImpl<TextRotation::None>(*this, renderMode, font, cp, lastBaseX, yPos, black, renderStyle,
+      renderCharImpl<TextRotation::None>(*this, renderMode, font, cp, fontX(lastBaseX), yPos, black, renderStyle,
                                          activeSyntheticBoldPixels);
     }
     prevCp = cp;
@@ -1118,6 +1159,11 @@ const char* resolveVisualText(const char* text, std::string& visualBuffer, const
 }  // namespace
 
 void GfxRenderer::drawLine(int x1, int y1, int x2, int y2, const bool state) const {
+  if (isScalingUi()) {
+    const PixelScope physical(*this);
+    drawLine(scaledUiEdge(x1), scaledUiEdge(y1), scaledUiEdge(x2), scaledUiEdge(y2), state);
+    return;
+  }
   if (fontCacheManager_ && fontCacheManager_->isScanning()) return;
   if (x1 == x2) {
     if (y2 < y1) {
@@ -1160,12 +1206,24 @@ void GfxRenderer::drawLine(int x1, int y1, int x2, int y2, const bool state) con
 }
 
 void GfxRenderer::drawLine(int x1, int y1, int x2, int y2, const int lineWidth, const bool state) const {
+  if (isScalingUi()) {
+    const PixelScope physical(*this);
+    drawLine(scaledUiEdge(x1), scaledUiEdge(y1), scaledUiEdge(x2), scaledUiEdge(y2), scaledUiEdge(lineWidth), state);
+    return;
+  }
   for (int i = 0; i < lineWidth; i++) {
     drawLine(x1, y1 + i, x2, y2 + i, state);
   }
 }
 
 void GfxRenderer::drawRect(const int x, const int y, const int width, const int height, const bool state) const {
+  if (isScalingUi()) {
+    int physicalX = x, physicalY = y, physicalW = width, physicalH = height;
+    scaleUiRect(physicalX, physicalY, physicalW, physicalH);
+    const PixelScope physical(*this);
+    drawRect(physicalX, physicalY, physicalW, physicalH, state);
+    return;
+  }
   drawLine(x, y, x + width - 1, y, state);
   drawLine(x + width - 1, y, x + width - 1, y + height - 1, state);
   drawLine(x + width - 1, y + height - 1, x, y + height - 1, state);
@@ -1175,6 +1233,13 @@ void GfxRenderer::drawRect(const int x, const int y, const int width, const int 
 // Border is inside the rectangle
 void GfxRenderer::drawRect(const int x, const int y, const int width, const int height, const int lineWidth,
                            const bool state) const {
+  if (isScalingUi()) {
+    int physicalX = x, physicalY = y, physicalW = width, physicalH = height;
+    scaleUiRect(physicalX, physicalY, physicalW, physicalH);
+    const PixelScope physical(*this);
+    drawRect(physicalX, physicalY, physicalW, physicalH, scaledUiEdge(lineWidth), state);
+    return;
+  }
   for (int i = 0; i < lineWidth && width - 2 * i > 0 && height - 2 * i > 0; i++) {
     drawRect(x + i, y + i, width - 2 * i, height - 2 * i, state);
   }
@@ -1230,6 +1295,14 @@ void GfxRenderer::drawRoundedRect(const int x, const int y, const int width, con
 void GfxRenderer::drawRoundedRect(const int x, const int y, const int width, const int height, const int lineWidth,
                                   const int cornerRadius, bool roundTopLeft, bool roundTopRight, bool roundBottomLeft,
                                   bool roundBottomRight, bool state) const {
+  if (isScalingUi()) {
+    int physicalX = x, physicalY = y, physicalW = width, physicalH = height;
+    scaleUiRect(physicalX, physicalY, physicalW, physicalH);
+    const PixelScope physical(*this);
+    drawRoundedRect(physicalX, physicalY, physicalW, physicalH, scaledUiEdge(lineWidth), scaledUiEdge(cornerRadius),
+                    roundTopLeft, roundTopRight, roundBottomLeft, roundBottomRight, state);
+    return;
+  }
   if (lineWidth <= 0 || width <= 0 || height <= 0) {
     return;
   }
@@ -1279,6 +1352,13 @@ void GfxRenderer::drawRoundedRect(const int x, const int y, const int width, con
 }
 
 void GfxRenderer::fillRect(const int x, const int y, const int width, const int height, const bool state) const {
+  if (isScalingUi()) {
+    int physicalX = x, physicalY = y, physicalW = width, physicalH = height;
+    scaleUiRect(physicalX, physicalY, physicalW, physicalH);
+    const PixelScope physical(*this);
+    fillRect(physicalX, physicalY, physicalW, physicalH, state);
+    return;
+  }
   if (state) {
     fillRectImpl<Color::Black>(x, y, width, height);
   } else {
@@ -1315,6 +1395,13 @@ void GfxRenderer::drawPixelDither<Color::DarkGray>(const int x, const int y) con
 
 void GfxRenderer::fillRectDither(const int x, const int y, const int width, const int height, Color color,
                                  const DitherMode mode) const {
+  if (isScalingUi()) {
+    int physicalX = x, physicalY = y, physicalW = width, physicalH = height;
+    scaleUiRect(physicalX, physicalY, physicalW, physicalH);
+    const PixelScope physical(*this);
+    fillRectDither(physicalX, physicalY, physicalW, physicalH, color, mode);
+    return;
+  }
   if (mode == DitherMode::PreserveInk && color == Color::White) return;
   switch (color) {
     case Color::Clear:
@@ -1549,6 +1636,13 @@ template void GfxRenderer::fillRectImpl<Color::DarkGray>(int, int, int, int, Dit
 
 void GfxRenderer::maskRoundedRectOutsideCorners(const int x, const int y, const int width, const int height,
                                                 const int radius, const Color color) const {
+  if (isScalingUi()) {
+    int physicalX = x, physicalY = y, physicalW = width, physicalH = height;
+    scaleUiRect(physicalX, physicalY, physicalW, physicalH);
+    const PixelScope physical(*this);
+    maskRoundedRectOutsideCorners(physicalX, physicalY, physicalW, physicalH, scaledUiEdge(radius), color);
+    return;
+  }
   if (radius <= 0 || color == Color::Clear) {
     return;
   }
@@ -1629,6 +1723,14 @@ void GfxRenderer::fillRoundedRect(const int x, const int y, const int width, con
 void GfxRenderer::fillRoundedRect(const int x, const int y, const int width, const int height, const int cornerRadius,
                                   bool roundTopLeft, bool roundTopRight, bool roundBottomLeft, bool roundBottomRight,
                                   const Color color) const {
+  if (isScalingUi()) {
+    int physicalX = x, physicalY = y, physicalW = width, physicalH = height;
+    scaleUiRect(physicalX, physicalY, physicalW, physicalH);
+    const PixelScope physical(*this);
+    fillRoundedRect(physicalX, physicalY, physicalW, physicalH, scaledUiEdge(cornerRadius), roundTopLeft, roundTopRight,
+                    roundBottomLeft, roundBottomRight, color);
+    return;
+  }
   if (width <= 0 || height <= 0) {
     return;
   }
@@ -1752,6 +1854,12 @@ void GfxRenderer::drawIconInverted(const uint8_t bitmap[], const int x, const in
 
 bool GfxRenderer::drawBitmapCropToFill(const Bitmap& bitmap, const int x, const int y, const int targetWidth,
                                        const int targetHeight) const {
+  if (isScalingUi()) {
+    int physicalX = x, physicalY = y, physicalW = targetWidth, physicalH = targetHeight;
+    scaleUiRect(physicalX, physicalY, physicalW, physicalH);
+    const PixelScope physical(*this);
+    return drawBitmapCropToFill(bitmap, physicalX, physicalY, physicalW, physicalH);
+  }
   if (fontCacheManager_ && fontCacheManager_->isScanning()) return false;
   const int sourceWidth = bitmap.getWidth();
   const int sourceHeight = bitmap.getHeight();
@@ -1845,6 +1953,15 @@ void GfxRenderer::cancelGrayscale16() const {
 }
 
 void GfxRenderer::drawGrayscale16Pixel(const int x, const int y, const uint8_t gray) const {
+  if (isScalingUi()) {
+    int physicalX = x, physicalY = y, width = 1, height = 1;
+    scaleUiRect(physicalX, physicalY, width, height);
+    const PixelScope physical(*this);
+    for (int py = physicalY; py < physicalY + height; ++py) {
+      for (int px = physicalX; px < physicalX + width; ++px) drawGrayscale16Pixel(px, py, gray);
+    }
+    return;
+  }
   if (!grayscale16Buffer || x < 0 || y < 0 || x >= getScreenWidth() || y >= getScreenHeight()) return;
   int px, py;
   rotateCoordinates(orientation, x, y, &px, &py, panelWidth, panelHeight);
@@ -1862,6 +1979,12 @@ void GfxRenderer::drawGrayscale16Pixel(const int x, const int y, const uint8_t g
 
 bool GfxRenderer::drawBitmapGrayscale16(const Bitmap& bitmap, const int x, const int y, const int maxWidth,
                                         const int maxHeight, const float cropX, const float cropY) const {
+  if (isScalingUi()) {
+    int physicalX = x, physicalY = y, physicalW = maxWidth, physicalH = maxHeight;
+    scaleUiRect(physicalX, physicalY, physicalW, physicalH);
+    const PixelScope physical(*this);
+    return drawBitmapGrayscale16(bitmap, physicalX, physicalY, physicalW, physicalH, cropX, cropY);
+  }
   if (!grayscale16Buffer || !std::isfinite(cropX) || !std::isfinite(cropY) || cropX < 0 || cropX >= 1 || cropY < 0 ||
       cropY >= 1 || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0)
     return false;
@@ -1898,6 +2021,12 @@ bool GfxRenderer::drawBitmapGrayscale16(const Bitmap& bitmap, const int x, const
 
 bool GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, const int maxWidth, const int maxHeight,
                              const float cropX, const float cropY, const bool preserveTransparency) const {
+  if (isScalingUi()) {
+    int physicalX = x, physicalY = y, physicalW = maxWidth, physicalH = maxHeight;
+    scaleUiRect(physicalX, physicalY, physicalW, physicalH);
+    const PixelScope physical(*this);
+    return drawBitmap(bitmap, physicalX, physicalY, physicalW, physicalH, cropX, cropY, preserveTransparency);
+  }
   if (fontCacheManager_ && fontCacheManager_->isScanning()) return false;
   // For 1-bit bitmaps, use optimized 1-bit rendering path (no crop support for 1-bit)
   if (bitmap.is1Bit() && cropX == 0.0f && cropY == 0.0f) {
@@ -2008,6 +2137,12 @@ bool GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
 
 bool GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y, const int maxWidth,
                                  const int maxHeight) const {
+  if (isScalingUi()) {
+    int physicalX = x, physicalY = y, physicalW = maxWidth, physicalH = maxHeight;
+    scaleUiRect(physicalX, physicalY, physicalW, physicalH);
+    const PixelScope physical(*this);
+    return drawBitmap1Bit(bitmap, physicalX, physicalY, physicalW, physicalH);
+  }
   float scale = 1.0f;
   bool isScaled = false;
   if (maxWidth > 0 && bitmap.getWidth() > maxWidth) {
@@ -2077,6 +2212,13 @@ bool GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y,
 }
 
 void GfxRenderer::preserveImagePolarity(const int x, const int y, const int width, const int height) const {
+  if (isScalingUi()) {
+    int physicalX = x, physicalY = y, physicalW = width, physicalH = height;
+    scaleUiRect(physicalX, physicalY, physicalW, physicalH);
+    const PixelScope physical(*this);
+    preserveImagePolarity(physicalX, physicalY, physicalW, physicalH);
+    return;
+  }
   if (renderMode != BW || !display.isInverted() || _stripActive || !frameBuffer || width <= 0 || height <= 0) return;
 
   const int lx0 = std::max(x, clipLeft_);
@@ -2284,6 +2426,7 @@ HalDisplay::GrayscaleCapabilities GfxRenderer::grayscaleCapabilities(HalDisplay:
 bool GfxRenderer::supportsAsyncGrayscaleBase() const { return grayscaleCapabilities().asyncBase; }
 
 size_t GfxRenderer::readFramebufferRegion(int x, int y, int w, int h, uint8_t* dst, size_t dstCapacity) const {
+  if (isScalingUi()) scaleUiRect(x, y, w, h);
   if (dst == nullptr || w <= 0 || h <= 0) return 0;
 
   const AlignedMemRect mem = screenRectToAlignedMemRect(orientation, x, y, w, h, panelWidth, panelHeight);
@@ -2302,6 +2445,7 @@ size_t GfxRenderer::readFramebufferRegion(int x, int y, int w, int h, uint8_t* d
 }
 
 void GfxRenderer::writeFramebufferRegion(int x, int y, int w, int h, const uint8_t* src) {
+  if (isScalingUi()) scaleUiRect(x, y, w, h);
   if (src == nullptr || w <= 0 || h <= 0) return;
 
   const AlignedMemRect mem = screenRectToAlignedMemRect(orientation, x, y, w, h, panelWidth, panelHeight);
@@ -2440,31 +2584,13 @@ std::vector<std::string> GfxRenderer::wrappedText(const int fontId, const char* 
 
 // Note: Internal driver treats screen in command orientation; this library exposes a logical orientation
 int GfxRenderer::getScreenWidth() const {
-  switch (orientation) {
-    case Portrait:
-    case PortraitInverted:
-      // 480px wide in portrait logical coordinates
-      return panelHeight;
-    case LandscapeClockwise:
-    case LandscapeCounterClockwise:
-      // 800px wide in landscape logical coordinates
-      return panelWidth;
-  }
-  return panelHeight;
+  const int pixels = orientation == Portrait || orientation == PortraitInverted ? panelHeight : panelWidth;
+  return isScalingUi() ? scaledUiLength(pixels) : pixels;
 }
 
 int GfxRenderer::getScreenHeight() const {
-  switch (orientation) {
-    case Portrait:
-    case PortraitInverted:
-      // 800px tall in portrait logical coordinates
-      return panelWidth;
-    case LandscapeClockwise:
-    case LandscapeCounterClockwise:
-      // 480px tall in landscape logical coordinates
-      return panelHeight;
-  }
-  return panelWidth;
+  const int pixels = orientation == Portrait || orientation == PortraitInverted ? panelWidth : panelHeight;
+  return isScalingUi() ? scaledUiLength(pixels) : pixels;
 }
 
 void GfxRenderer::tapToLogical(float nx, float ny, int& outX, int& outY) const {
@@ -2493,6 +2619,10 @@ void GfxRenderer::tapToLogical(float nx, float ny, int& outX, int& outY) const {
       outX = phyX;
       outY = phyY;
       break;
+  }
+  if (isScalingUi()) {
+    outX = scaledUiHit(outX);
+    outY = scaledUiHit(outY);
   }
 }
 
@@ -2530,6 +2660,7 @@ static bool logicalRectToPhysicalBounds(GfxRenderer::Orientation orientation, in
 }
 
 size_t GfxRenderer::getRegionByteSize(int lx, int ly, int lw, int lh) const {
+  if (isScalingUi()) scaleUiRect(lx, ly, lw, lh);
   int x0, y0, x1, y1;
   if (!logicalRectToPhysicalBounds(orientation, lx, ly, lw, lh, panelWidth, panelHeight, &x0, &y0, &x1, &y1)) {
     return 0;
@@ -2544,6 +2675,7 @@ size_t GfxRenderer::getRegionByteSize(int lx, int ly, int lw, int lh) const {
 }
 
 bool GfxRenderer::copyRegionToBuffer(int lx, int ly, int lw, int lh, uint8_t* buf, size_t bufSize) const {
+  if (isScalingUi()) scaleUiRect(lx, ly, lw, lh);
   int x0, y0, x1, y1;
   if (!logicalRectToPhysicalBounds(orientation, lx, ly, lw, lh, panelWidth, panelHeight, &x0, &y0, &x1, &y1)) {
     return false;
@@ -2562,6 +2694,7 @@ bool GfxRenderer::copyRegionToBuffer(int lx, int ly, int lw, int lh, uint8_t* bu
 }
 
 bool GfxRenderer::copyBufferToRegion(int lx, int ly, int lw, int lh, const uint8_t* buf, size_t bufSize) const {
+  if (isScalingUi()) scaleUiRect(lx, ly, lw, lh);
   int x0, y0, x1, y1;
   if (!logicalRectToPhysicalBounds(orientation, lx, ly, lw, lh, panelWidth, panelHeight, &x0, &y0, &x1, &y1)) {
     return false;
@@ -2702,7 +2835,7 @@ int GfxRenderer::getTextAdvanceX(int fontId, const char* text, EpdFontFamily::St
       prevCp = cp;
     }
     if (havePrev) widthPx += fp4::toPixel(prevAdvanceFP);  // final glyph's advance
-    return widthPx;
+    return isScalingUi() ? scaledUiLength(scaleGlyphMetric(widthPx, uiGlyphScale(fontId))) : widthPx;
   }
 
   const auto fontIt = fontMap.find(resolvedFontId);
@@ -2751,7 +2884,7 @@ int GfxRenderer::getTextAdvanceX(int fontId, const char* text, EpdFontFamily::St
     prevMissing = missing;
   }
   widthPx += fp4::toPixel(prevAdvanceFP);  // final glyph's advance
-  return widthPx;
+  return isScalingUi() ? scaledUiLength(scaleGlyphMetric(widthPx, uiGlyphScale(fontId))) : widthPx;
 }
 
 bool GfxRenderer::getCodepointMetrics(const int fontId, const uint32_t cp, const EpdFontFamily::Style style,
@@ -2819,17 +2952,52 @@ int GfxRenderer::drawScaledCodepoint(const int fontId, const uint32_t cp, const 
   return advance;
 }
 
+std::array<int, 2> GfxRenderer::getAsciiTextInkY(int fontId, const char* text, EpdFontFamily::Style style) const {
+  if (!text || !*text) return {};
+  const auto fontIt = fontMap.find(resolveFontFamilyId(fontId));
+  if (fontIt == fontMap.end()) return {};
+
+  const auto& font = fontIt->second;
+  const bool scaled = isScalingUi();
+  const int scale = scaled ? uiGlyphScale(fontId) : kGlyphScaleOne;
+  const int ascender = scaleGlyphMetric(font.getData(EpdFontFamily::REGULAR)->ascender, scale);
+  int top = 0;
+  int bottom = 0;
+  for (const auto* cp = reinterpret_cast<const unsigned char*>(text); *cp; ++cp) {
+    if (*cp >= 0x80) return {};
+    const auto* glyph = font.getGlyph(*cp, style);
+    if (!glyph || !glyph->height) continue;
+
+    // Match drawText's baseline and renderCharScaled's bearing and bitmap extent.
+    const int glyphTop = ascender - glyph->top * scale / kGlyphScaleOne;
+    const int glyphHeight = (glyph->height * scale + kGlyphScaleOne - 1) / kGlyphScaleOne;
+    const int glyphBottom = glyphTop + glyphHeight;
+    if (top == bottom) {
+      top = glyphTop;
+      bottom = glyphBottom;
+    } else {
+      top = std::min(top, glyphTop);
+      bottom = std::max(bottom, glyphBottom);
+    }
+  }
+  if (scaled) {
+    top = scaledUiLength(top);
+    bottom = scaledUiLength(bottom);
+  }
+  return {top, bottom - top};
+}
+
 int GfxRenderer::getFontAscenderSize(int fontId) const {
   // Row height / ascender must follow a rebound id, or the row is sized for the
   // built-in face and the SD face is clipped out of it. See setPreferredFont().
-  fontId = resolveFontFamilyId(fontId);
-  const auto fontIt = fontMap.find(fontId);
+  const auto fontIt = fontMap.find(resolveFontFamilyId(fontId));
   if (fontIt == fontMap.end()) {
     LOG_ERR("GFX", "Font %d not found", fontId);
     return 0;
   }
 
-  return fontIt->second.getData(EpdFontFamily::REGULAR)->ascender;
+  const int pixels = fontIt->second.getData(EpdFontFamily::REGULAR)->ascender;
+  return isScalingUi() ? scaledUiLength(scaleGlyphMetric(pixels, uiGlyphScale(fontId))) : pixels;
 }
 
 int GfxRenderer::getLineHeight(int fontId) const {
@@ -2841,7 +3009,8 @@ int GfxRenderer::getLineHeight(int fontId) const {
     return 0;
   }
 
-  return fontIt->second.getData(EpdFontFamily::REGULAR)->advanceY;
+  const int pixels = fontIt->second.getData(EpdFontFamily::REGULAR)->advanceY;
+  return isScalingUi() ? scaledUiLength(scaleGlyphMetric(pixels, uiGlyphScale(fontId))) : pixels;
 }
 
 int GfxRenderer::getLineHeight(const int fontId, const float compression) const {
@@ -2851,22 +3020,28 @@ int GfxRenderer::getLineHeight(const int fontId, const float compression) const 
     LOG_ERR("GFX", "Font %d not found", fontId);
     return 0;
   }
-  return static_cast<int>(fontIt->second.getSizeInPixels() * compression + 0.5f);
+  const int pixels = static_cast<int>(fontIt->second.getSizeInPixels() * compression + 0.5f);
+  return isScalingUi() ? scaledUiLength(scaleGlyphMetric(pixels, uiGlyphScale(fontId))) : pixels;
 }
 
 int GfxRenderer::getTextHeight(int fontId) const {
   // Text height must follow a rebound id (see setPreferredFont()).
-  fontId = resolveFontFamilyId(fontId);
-  const auto fontIt = fontMap.find(fontId);
+  const auto fontIt = fontMap.find(resolveFontFamilyId(fontId));
   if (fontIt == fontMap.end()) {
     LOG_ERR("GFX", "Font %d not found", fontId);
     return 0;
   }
-  return fontIt->second.getData(EpdFontFamily::REGULAR)->ascender;
+  const int pixels = fontIt->second.getData(EpdFontFamily::REGULAR)->ascender;
+  return isScalingUi() ? scaledUiLength(scaleGlyphMetric(pixels, uiGlyphScale(fontId))) : pixels;
 }
 
 void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y, const char* text, const bool black,
                                       const EpdFontFamily::Style style) const {
+  if (isScalingUi()) {
+    const PixelScope native(*this);
+    drawTextRotated90CW(fontId, scaledUiEdge(x), scaledUiEdge(y), text, black, style);
+    return;
+  }
   // Cannot draw a NULL / empty string
   if (text == nullptr || *text == '\0') {
     return;
@@ -2978,6 +3153,12 @@ bool GfxRenderer::displayGrayscaleBase(HalDisplay::GrayscaleMode mode, HalDispla
 void GfxRenderer::preconditionGrayscale() const { display.preconditionGrayscale(); }
 
 void GfxRenderer::preconditionGrayscale(int x, int y, int w, int h) const {
+  if (isScalingUi()) {
+    scaleUiRect(x, y, w, h);
+    const PixelScope physical(*this);
+    preconditionGrayscale(x, y, w, h);
+    return;
+  }
   if (w <= 0 || h <= 0) return;
   // Rotate the logical rect's opposite corners to physical panel coords; the
   // physical bbox stays axis-aligned for all four orientations.
@@ -3183,5 +3364,13 @@ void GfxRenderer::getOrientedViewableTRBL(int* outTop, int* outRight, int* outBo
       *outBottom = insets.left;
       *outLeft = insets.top;
       break;
+  }
+  if (isScalingUi()) {
+    const int width = getScreenWidth(), height = getScreenHeight();
+    const PixelScope physical(*this);
+    if (*outRight) *outRight = width - scaledUiHit(getScreenWidth() - *outRight);
+    if (*outBottom) *outBottom = height - scaledUiHit(getScreenHeight() - *outBottom);
+    *outTop = (2 * *outTop + 1) / 3;
+    *outLeft = (2 * *outLeft + 1) / 3;
   }
 }

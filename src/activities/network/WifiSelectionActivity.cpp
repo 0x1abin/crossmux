@@ -956,7 +956,7 @@ void WifiSelectionActivity::render(RenderLock&&) {
     // The same measured band is reserved by buildListScreen, keeping rows and
     // their hit regions clear of translated MAC/count text.
     GUI.drawSubHeader(renderer, subtitle, nullptr, nullptr);
-    const int padding = UiHighDpiProfile::enabled ? UiHighDpiProfile::contentPadding : 20;
+    const int padding = UiHighDpiProfile::active() ? UiHighDpiProfile::contentPadding : 20;
     const int width = std::max(1, subtitle.width - 2 * padding);
     fui::TextStyle text;
     text.font = fui::GfxRendererTarget::FONT_BODY;
@@ -1038,7 +1038,7 @@ int WifiSelectionActivity::subtitleHeight() const {
   char count[64];
   snprintf(count, sizeof(count), tr(STR_NETWORKS_FOUND), realNetworkCount);
   const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
-  const int padding = UiHighDpiProfile::enabled ? UiHighDpiProfile::contentPadding : 20;
+  const int padding = UiHighDpiProfile::active() ? UiHighDpiProfile::contentPadding : 20;
   const int width = std::max(1, safe.width - 2 * padding);
   fui::TextStyle text;
   text.font = fui::GfxRendererTarget::FONT_BODY;
@@ -1138,9 +1138,9 @@ void WifiSelectionActivity::buildListScreen(UiScreen& screen) {
 
 void WifiSelectionActivity::addTouchControls(UiScreen& screen, const char* label, const fui::ActionId action) {
   const auto& theme = screen.theme();
-  const int gap = std::max(6, UiHighDpiProfile::enabled ? UiHighDpiProfile::controlGap : theme.spaceLg);
+  const int gap = std::max(6, UiHighDpiProfile::active() ? UiHighDpiProfile::controlGap : theme.spaceLg);
   const int height =
-      UiHighDpiProfile::enabled ? UiHighDpiProfile::buttonHeight : std::max(theme.rowHeight, theme.minTouchSize);
+      UiHighDpiProfile::active() ? UiHighDpiProfile::buttonHeight : std::max(theme.rowHeight, theme.minTouchSize);
   const fui::Rect band = screen.takeBottom(height, gap);
   const int width = label ? (band.width - gap) / 2 : band.width;
   fui::ButtonProps cancel;

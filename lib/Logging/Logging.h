@@ -39,6 +39,9 @@ static HardwareSerial& logSerial = Serial;
 #define LOG_SERIAL_HAS_TX_TIMEOUT 0
 #endif
 
+// Constant initialization keeps constructor-time logs away from unconstructed serial objects.
+inline bool loggingSerialStarted = false;
+
 void logPrintf(const char* level, const char* origin, const char* format, ...);
 
 #ifdef ENABLE_SERIAL_LOG
@@ -75,7 +78,10 @@ bool sanitizeLogHead();
 
 class MySerialImpl : public Print {
  public:
-  void begin(unsigned long baud) { logSerial.begin(baud); }
+  void begin(unsigned long baud) {
+    logSerial.begin(baud);
+    loggingSerialStarted = true;
+  }
 
   // Support boolean conversion for compatibility with code like:
   //   if (Serial) or while (!Serial)

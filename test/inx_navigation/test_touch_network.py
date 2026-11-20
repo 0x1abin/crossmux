@@ -301,7 +301,7 @@ code=trace+r'''
 namespace fui=freeink::ui;
 using UiScreen=fui::Screen<24>;
 struct UITheme {static UITheme& getInstance(){static UITheme t;return t;} struct {int listRowHeight=56;} metrics;const auto& getMetrics()const{return metrics;}};
-namespace UiHighDpiProfile {inline bool enabled=false;constexpr int buttonHeight=96,controlGap=12;}
+namespace UiHighDpiProfile {inline bool enabled=false;bool active(){return enabled;}constexpr int buttonHeight=96,controlGap=12;}
 enum class StrId {STR_CANCEL, STR_BACK};const char* translate(StrId id){return id==StrId::STR_BACK?"Back":"Cancel";}
 #define tr(id) translate(StrId::id)
 struct {int deletes=0,disconnects=0;void scanDelete(){++deletes;}void disconnect(){++disconnects;}} WiFi;
@@ -372,7 +372,7 @@ struct Rect {int x,y,width,height;};
 namespace EpdFontFamily {enum Style {REGULAR,BOLD};}
 constexpr int UI_10_FONT_ID=1,UI_12_FONT_ID=2,SMALL_FONT_ID=3;
 namespace freeink::ui {struct GfxRendererTarget {static constexpr FontId FONT_BODY=1;};}
-namespace UiHighDpiProfile {inline bool enabled=false;constexpr int buttonHeight=96,controlGap=12;}
+namespace UiHighDpiProfile {inline bool enabled=false;bool active(){return enabled;}constexpr int buttonHeight=96,controlGap=12;}
 struct Draw {Rect rect;std::string text;int font;EpdFontFamily::Style style;};
 struct GfxRenderer {
  int width=480,height=800;std::vector<Draw> draws;

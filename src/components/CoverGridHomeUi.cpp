@@ -53,7 +53,8 @@ void CoverGridHomeUi::refreshCoverPath(size_t index) {
   if (index >= books->size() || index >= coverPaths.size()) return;
   coverCache.invalidate(index);
   coverPaths[index] =
-      thumbHeight > 0 ? UITheme::getCoverThumbPath((*books)[index].coverBmpPath, thumbHeight) : std::string();
+      thumbHeight > 0 ? UITheme::getCoverThumbPath((*books)[index].coverBmpPath, renderer.toNativeUiLength(thumbHeight))
+                      : std::string();
 }
 
 int CoverGridHomeUi::thumbHeightFor() const { return thumbHeight > 0 ? thumbHeight : THUMB_HEIGHT; }

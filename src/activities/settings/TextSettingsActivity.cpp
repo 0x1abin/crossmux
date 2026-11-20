@@ -434,10 +434,10 @@ void TextSettingsActivity::drawChrome() {
   const int clipTop = std::max(previewBounds.y, savedY);
   const int clipRight = std::min(previewBounds.x + previewBounds.width, savedX + savedWidth);
   const int clipBottom = std::min(previewBounds.y + previewBounds.height, savedY + savedHeight);
-  renderer.setClipRect(clipLeft, clipTop, std::max(0, clipRight - clipLeft), std::max(0, clipBottom - clipTop));
+  const GfxRenderer::ClipScope previewClip(renderer, clipLeft, clipTop, std::max(0, clipRight - clipLeft),
+                                           std::max(0, clipBottom - clipTop));
   textsettings::renderPreview(renderer, previewLayout_, metrics_.previewPadding, metrics_.verticalSpacing,
                               previewBounds, labelBuf);
-  renderer.setClipRect(savedX, savedY, savedWidth, savedHeight);
 }
 
 void TextSettingsActivity::drawFooter() {

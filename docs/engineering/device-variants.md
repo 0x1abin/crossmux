@@ -36,6 +36,7 @@ pio run -e eego_a4
 pio run -e murphy_m4
 pio run -e waveshare_epaper_397
 pio run -e metalio_eink4
+PLATFORMIO_CORE_DIR=/tmp/crossmux-s31-pio PLATFORMIO_BUILD_DIR=.pio/build-s31 pio run -e metalio_eink4_plus # separate ESP32-S31 toolchain
 pio run -e readpico
 pio run -e lilygo_t5s3
 pio run -e picco
@@ -51,6 +52,10 @@ one unified image, which is published under both legacy flavor pointers.
 Manual flashing must use the matching build; the embedded
 board tag rejects a tagged image for a different board. See
 [firmware-release.md](firmware-release.md) for publishing and rollback details.
+
+### Metalio E-Ink4-Plus development target
+
+[Metalio E-Ink4-Plus](metalio-eink4-plus.md) is ESP32-S31 (RISC-V), a separate MCU family and firmware image. It uses Arduino-ESP32 4 / ESP-IDF 6.1 in an isolated PlatformIO package directory. Its 1216×684 geometry, high-density UI and native sixteen-level API match Read Pico at the application boundary; its 8-bit LCD bus, TPS65185 power, FT6336U input and shutdown sequence remain board-owned. It is outside public Stable/Nightly/OTA indexes and has no physical acceptance recorded for this port.
 
 ### BOOX Picco development target
 

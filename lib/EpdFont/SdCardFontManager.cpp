@@ -83,7 +83,7 @@ bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRender
   }
 
   // Reuse capacity on reload; ReadPico also keeps the original footer sizes.
-#if FREEINK_DEVICE_READPICO
+#if FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS
   loaded_.reserve(5);
 #else
   loaded_.reserve(4);

@@ -41,16 +41,17 @@ void drawAppsMenuIcon(const GfxRenderer& renderer, int x, int y, bool selected) 
 
 void drawCover(const GfxRenderer& renderer, const RecentBook& book, int x, int y, int width, int height) {
   if (!book.coverBmpPath.empty()) {
-    const std::string coverPath =
-        UITheme::getCoverThumbPath(book.coverBmpPath, LyraCarouselMetrics::values.homeCoverHeight);
+    const std::string coverPath = UITheme::getCoverThumbPath(
+        book.coverBmpPath, renderer.toNativeUiLength(LyraCarouselMetrics::values.homeCoverHeight));
     HalFile file;
     if (Storage.openFileForRead("HOME", coverPath, file)) {
       Bitmap bitmap(file);
-      if (bitmap.parseHeaders() == BmpReaderError::Ok && bitmap.getWidth() > 0 && bitmap.getHeight() > 0) {
-        const float scale = std::min(
-            {1.0f, static_cast<float>(width) / bitmap.getWidth(), static_cast<float>(height) / bitmap.getHeight()});
-        const int drawWidth = std::max(1, static_cast<int>(bitmap.getWidth() * scale));
-        const int drawHeight = std::max(1, static_cast<int>(bitmap.getHeight() * scale));
+      if (bitmap.parseHeaders() == BmpReaderError::Ok && renderer.bitmapUiWidth(bitmap) > 0 &&
+          renderer.bitmapUiHeight(bitmap) > 0) {
+        const float scale = std::min({1.0f, static_cast<float>(width) / renderer.bitmapUiWidth(bitmap),
+                                      static_cast<float>(height) / renderer.bitmapUiHeight(bitmap)});
+        const int drawWidth = std::max(1, static_cast<int>(renderer.bitmapUiWidth(bitmap) * scale));
+        const int drawHeight = std::max(1, static_cast<int>(renderer.bitmapUiHeight(bitmap) * scale));
         const int drawX = x + (width - drawWidth) / 2;
         const int drawY = y + (height - drawHeight) / 2;
         renderer.drawBitmap(bitmap, drawX, drawY, drawWidth, drawHeight);

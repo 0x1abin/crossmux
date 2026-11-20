@@ -152,6 +152,7 @@ struct GfxRenderer {
   void setRenderMode(RenderMode m) {mode=m;}
   int getLineHeight(int,float) const {return 1;}
   int getFontAscenderSize(int) const {return 1;}
+  struct PixelScope {explicit PixelScope(const GfxRenderer&) {}};
   struct FrameBufferLoan {explicit FrameBufferLoan(GfxRenderer&) {}};
   struct SyntheticBoldScope {SyntheticBoldScope(GfxRenderer&,uint8_t) {}};
 };

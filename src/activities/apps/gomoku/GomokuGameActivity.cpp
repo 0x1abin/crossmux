@@ -145,7 +145,7 @@ int GomokuGameActivity::boardPitch() const {
   //
   // Gated on the device on purpose: every other board keeps the exact pitch it
   // was tuned with, byte for byte, so this cannot regress them.
-#if defined(FREEINK_DEVICE_READPICO) && FREEINK_DEVICE_READPICO
+#if FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS
   const int n = board.boardSize - 1;
   const int side = UITheme::getInstance().getMetrics().contentSidePadding;
   const int availW = renderer.getScreenWidth() - 2 * side;
@@ -167,7 +167,7 @@ int GomokuGameActivity::boardOriginY() const {
   // rule, correct when the grid nearly filled the panel) would leave a large gap
   // above the action bar. Center it in the available band instead. Gated, so no
   // other board's origin moves.
-#if defined(FREEINK_DEVICE_READPICO) && FREEINK_DEVICE_READPICO
+#if FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS
   const int n = board.boardSize - 1;
   const int availH = actionBarY() - BOARD_AREA_Y;
   const int used = n * boardPitch();
@@ -182,7 +182,7 @@ int GomokuGameActivity::stoneRadius() const {
   // against the adaptive pitch instead of freezing the stones at 12 px on a grid
   // whose cells are now ~46 px (which read as tiny dots in big squares).
   // Gated, so every other board keeps its pixel-exact stones.
-#if defined(FREEINK_DEVICE_READPICO) && FREEINK_DEVICE_READPICO
+#if FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS
   return std::max(1, boardPitch() * 2 / 5);
 #else
   return (board.boardSize == 15) ? 12 : 20;

@@ -79,15 +79,15 @@ void RoundedRaffTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
       if (coverPath.empty()) {
         hasCover = false;
       } else {
-        const std::string coverBmpPath =
-            UITheme::getCoverThumbPath(coverPath, RoundedRaffMetrics::values.homeCoverHeight);
+        const std::string coverBmpPath = UITheme::getCoverThumbPath(
+            coverPath, renderer.toNativeUiLength(RoundedRaffMetrics::values.homeCoverHeight));
 
         // First time: load cover from SD and render
         HalFile file;
         if (Storage.openFileForRead("HOME", coverBmpPath, file)) {
           Bitmap bitmap(file);
           if (bitmap.parseHeaders() == BmpReaderError::Ok) {
-            coverWidth = bitmap.getWidth();
+            coverWidth = renderer.bitmapUiWidth(bitmap);
             // Narrow covers come out taller than the slot; fill 1:1 and crop
             // vertically instead of rescaling the dither.
             drawCoverThumbFill(renderer, bitmap,

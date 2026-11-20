@@ -139,6 +139,7 @@ endforeach()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME HalPowerSources COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/test_hal_power_sources.py)
+add_test(NAME LoggingStartup COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/test_logging_startup.py)
 add_test(NAME SdkBatteryMonitor
   COMMAND sh ${REPO_ROOT}/freeink-sdk/libs/hardware/BatteryMonitor/test/host/run.sh)
 add_test(NAME ClippingHighlightPlanes COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/test_clipping_highlight_planes.py)
@@ -342,3 +343,5 @@ add_test(NAME SdFontUpstreamPresets COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/s
 add_test(NAME CppcheckDependency COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_cppcheck_dependency.py)
 
 add_test(NAME SleepScreenPickerOrder COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_sleep_screen_picker_order.py)
+add_test(NAME MetalioEInk4Plus COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${REPO_ROOT}/scripts/tests -p test_metalio_eink4_plus.py)
+add_test(NAME HalSha256 COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/test_hal_sha256.py)

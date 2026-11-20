@@ -433,11 +433,11 @@ int KeyboardEntryActivity::lineBreakEnd(std::string& s, const int start, const i
 }
 
 int KeyboardEntryActivity::inputLineCount() const {
-  return UiHighDpiProfile::enabled && renderer.getScreenWidth() > renderer.getScreenHeight() ? 1 : 2;
+  return UiHighDpiProfile::active() && renderer.getScreenWidth() > renderer.getScreenHeight() ? 1 : 2;
 }
 
 int KeyboardEntryActivity::inputWindowStart(std::string& displayText, const int width) const {
-  if (!UiHighDpiProfile::enabled) return 0;
+  if (!UiHighDpiProfile::active()) return 0;
   int previous = 0;
   int start = 0;
   while (start < static_cast<int>(displayText.size())) {
@@ -452,7 +452,7 @@ int KeyboardEntryActivity::inputWindowStart(std::string& displayText, const int 
 
 int KeyboardEntryActivity::inputStartY() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  if (UiHighDpiProfile::enabled) {
+  if (UiHighDpiProfile::active()) {
     const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer);
     return safe.y + metrics.topPadding + metrics.headerHeight + UiHighDpiProfile::controlGap;
   }
@@ -503,7 +503,7 @@ bool KeyboardEntryActivity::cursorPositionFromPoint(const int x, const int y, si
   int lastLineWidth = 0;
 
   while (true) {
-    if (UiHighDpiProfile::enabled && lineY >= inputY + inputLineCount() * lineHeight) break;
+    if (UiHighDpiProfile::active() && lineY >= inputY + inputLineCount() * lineHeight) break;
     const int lineEndIdx = lineBreakEnd(displayText, lineStartIdx, maxLineWidth);
     const int textWidth = measureRange(displayText, lineStartIdx, lineEndIdx);
     const int lineStartX = centerText ? textLeft + (maxLineWidth - textWidth) / 2 : textLeft;
@@ -578,7 +578,7 @@ fui::Rect KeyboardEntryActivity::keyboardRect() const {
   const int pageHeight = renderer.getScreenHeight();
   const int rows = currentLayout().rowCount;
   const bool hasTouch = mappedInput.hasTouch();
-  if (UiHighDpiProfile::enabled) {
+  if (UiHighDpiProfile::active()) {
     const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer);
     const int bottom = safe.y + safe.height - metrics.buttonHintsHeight - UiHighDpiProfile::controlGap;
     // Compact landscape keeps the cursor's line visible and spends the saved
@@ -612,7 +612,7 @@ fui::Rect KeyboardEntryActivity::keyboardRect() const {
 
 fui::Rect KeyboardEntryActivity::keyboardKeysRect() const {
   const fui::Rect panel = keyboardRect();
-  if (UiHighDpiProfile::enabled) return panel;
+  if (UiHighDpiProfile::active()) return panel;
   const int height =
       keyboardKeysHeight(UITheme::getInstance().getMetrics(), currentLayout().rowCount, mappedInput.hasTouch());
   return fui::Rect{panel.x, static_cast<int16_t>(panel.y + (panel.height - height) / 2), panel.width,
@@ -886,7 +886,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   bool cursorDrawn = false;
 
   while (true) {
-    if (UiHighDpiProfile::enabled && inputHeight >= inputLineCount() * lineHeight) break;
+    if (UiHighDpiProfile::active() && inputHeight >= inputLineCount() * lineHeight) break;
     const int lineEndIdx = lineBreakEnd(displayText, lineStartIdx, maxLineWidth);
     const std::string lineText = displayText.substr(lineStartIdx, lineEndIdx - lineStartIdx);
     textWidth = renderer.getTextAdvanceX(UI_12_FONT_ID, lineText.c_str(), EpdFontFamily::REGULAR);
@@ -1092,7 +1092,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   props.labelText.font = layoutId == fui::KeyboardLayoutId::ArabicAr && !symbols ? fui::GfxRendererTarget::FONT_SMALL
                                                                                  : fui::GfxRendererTarget::FONT_BODY;
   props.altText.font = fui::GfxRendererTarget::FONT_SMALL;
-  if (UiHighDpiProfile::enabled) {
+  if (UiHighDpiProfile::active()) {
     const int rows = layout.rowCount;
     const int keyHeight =
         (keysRect.height - KEYBOARD_PANEL_PADDING * 2 - (rows - 1) * keyboardGap(metrics, inputLineCount() == 1)) /
@@ -1101,14 +1101,14 @@ void KeyboardEntryActivity::render(RenderLock&&) {
       props.labelText.font = fui::GfxRendererTarget::FONT_SMALL;
   }
   props.gap = props.rowGap =
-      static_cast<int16_t>(keyboardGap(metrics, UiHighDpiProfile::enabled && inputLineCount() == 1));
+      static_cast<int16_t>(keyboardGap(metrics, UiHighDpiProfile::active() && inputLineCount() == 1));
   if (urlPanel) props.uniformKeyWidth = false;  // Shortcut rows stretch independently.
   if (!mappedInput.hasTouch()) props.background = fui::Paint::none();
   frame.target().fill(kbRect, props.background);
   const int bottomEdge =
       mappedInput.hasTouch() ? renderer.getScreenHeight() : renderer.getScreenHeight() - metrics.buttonHintsHeight;
   props.bottomHitOverflow =
-      UiHighDpiProfile::enabled ? 0 : static_cast<int16_t>(std::max(0, bottomEdge - keysRect.bottom()));
+      UiHighDpiProfile::active() ? 0 : static_cast<int16_t>(std::max(0, bottomEdge - keysRect.bottom()));
   fui::keyboard(frame, keysRect, props);
   interactions.publish();
   interactionsReady = true;

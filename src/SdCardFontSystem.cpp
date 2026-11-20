@@ -71,7 +71,7 @@ constexpr UiFontSize kUiFontSizes[] = {
     {UI_10_FONT_ID, 10, CJK_UI_10_FONT_ID},
     {UI_12_FONT_ID, 12, CJK_UI_12_FONT_ID},
 #endif
-#if FREEINK_DEVICE_READPICO
+#if FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
     {READER_STATUS_FONT_ID, 12, CJK_UI_12_FONT_ID}, {READER_ESTIMATE_FONT_ID, 14, CJK_UI_14_FONT_ID},
 #else
@@ -79,7 +79,7 @@ constexpr UiFontSize kUiFontSizes[] = {
 #endif
 #endif
 };
-#if FREEINK_DEVICE_READPICO
+#if FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS
 // Read Pico's 4.7" 1216x684 panel is ~300 PPI, roughly double the other targets'
 // density, so the shared 8/10/12 pt UI sizes render about half as large on the glass
 // and read as too small. These replace the table's point sizes on this device only;
@@ -298,7 +298,7 @@ void SdCardFontSystem::setupUiFallbacks(GfxRenderer& renderer) {
   if (!family) return;
 
   renderer.clearPreferredFonts();
-#if !FREEINK_DEVICE_READPICO
+#if !(FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS)
   // Probe the reader face before loading additional UI sizes.
   const auto readerIt = renderer.getFontMap().find(manager_.getFontId(familyName));
   if (readerIt == renderer.getFontMap().end()) return;
@@ -349,7 +349,7 @@ void SdCardFontSystem::setupUiFallbacks(GfxRenderer& renderer) {
 
   for (size_t i = 0; i < std::size(kUiFontSizes); ++i) {
     const auto& ui = kUiFontSizes[i];
-#if FREEINK_DEVICE_READPICO
+#if FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS
     const uint8_t pointSize = kReadPicoUiPointSizes[i];
 #else
     const uint8_t pointSize = ui.pointSize;
@@ -364,7 +364,7 @@ void SdCardFontSystem::setupUiFallbacks(GfxRenderer& renderer) {
         continue;
       }
 #endif
-#if FREEINK_DEVICE_READPICO
+#if FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS
       // Read Pico renders its whole UI in the selected reading family at the enlarged
       // sizes above, so the SD face has to BE this id, not merely a per-glyph fallback.
       // A fallback-only mapping left pure-ASCII runs resolving to the built-in face

@@ -24,6 +24,7 @@ class BuildModesTest(unittest.TestCase):
         development = {
             'default', 'sticky', 'x4pro', 'papermono', 'eego_a4', 'murphy_m4',
             'waveshare_epaper_397', 'metalio_eink4', 'readpico', 'x4c', 'lilygo_t5s3', 'picco',
+            'metalio_eink4_plus',
         }
         simulators = {
             'simulator', 'simulator_x3', 'simulator_sticky', 'simulator_eego_a4',

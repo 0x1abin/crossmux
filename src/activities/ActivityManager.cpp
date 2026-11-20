@@ -226,6 +226,9 @@ void ActivityManager::loop() {
         continue;
       }
 
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+      mappedInput.discardBufferedTouch();
+#endif
       ++screenVisit;
       ActivityResult pendingResult = std::move(currentActivity->result);
 
@@ -287,6 +290,9 @@ void ActivityManager::loop() {
       }
       pendingAction.store(PendingAction::None);
       ++screenVisit;
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+      mappedInput.discardBufferedTouch();
+#endif
       currentActivity = std::move(pendingActivity);
       resetHomeStandbyInput();
 
@@ -499,6 +505,9 @@ void ActivityManager::replaceActivity(std::unique_ptr<Activity>&& newActivity) {
     pendingAction = PendingAction::Replace;
   } else {
     // No current activity, safe to launch immediately
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    mappedInput.discardBufferedTouch();
+#endif
     currentActivity = std::move(newActivity);
     resetHomeStandbyInput();
     currentActivity->onEnter();

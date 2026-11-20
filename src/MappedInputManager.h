@@ -112,6 +112,7 @@ class MappedInputManager {
   bool wasHomeGesture() const;
   // Configured one-frame action, independent of the gesture that triggered it.
   HomeButtonAction homeButtonAction() const { return homeAction; }
+  void discardBufferedTouch() const;
   void resetHomeButtonInput() const {
     homeButtonInput.reset();
     deferredHomeAction = HomeButtonAction::Ignore;

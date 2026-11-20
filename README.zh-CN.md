@@ -32,6 +32,7 @@
 | Murphy M4 | ESP32-S3 | Nightly |
 | Waveshare ePaper 3.97 | ESP32-S3 | Nightly |
 | [Metalio E-Ink 4](./docs/engineering/metalio-eink4.md) | ESP32-S3 | Stable、Nightly |
+| [Metalio E-Ink4-Plus](./docs/engineering/metalio-eink4-plus.md) | ESP32-S31 | 开发构建，实机待验收 |
 | [Read Pico（小纸 Pico）](./docs/engineering/read-pico.md) | ESP32-S3 | Nightly |
 
 正式版仅发布 X3/X4、Sticky、X4 Pro 和 Metalio E-Ink 4 四个目标；Nightly 发布九个目标。本地 Stable 构建模式不代表具备正式发布资格，实际可下载版本以所选区域目录为准。配置支持不代表实机验收完成。每个 S3 目标使用独立固件。X4 Classic（`x4c`）、[LilyGo T5 S3 4.7 PRO/Lite](./docs/engineering/lilygo-t5s3.md)（`lilygo_t5s3`）和 BOOX Picco（`picco`）仅提供开发构建。各设备限制见[设备变体说明](./docs/engineering/device-variants.md)。
@@ -81,7 +82,15 @@ pio run -e gh_release
 pio run -e gh_release -t upload
 ```
 
-应用固件位于 `.pio/build/<环境>/firmware.bin`。仓库配置共 36 个构建入口：九个硬件目标各有本地 Dev、Stable、Nightly 模式，另有三个仅开发板型和六个模拟器；只有上表四个目标具备正式发布资格。版本与 Git 哈希自动生成：Stable 为 `<基础版本>`，Nightly 为 `<基础版本>-rc+<7位SHA>`，Dev 为 `<基础版本>-dev-<分支>-<7位SHA>`。其它板型见[构建文档](./docs/engineering/build-system.md)。
+应用固件位于 `.pio/build/<环境>/firmware.bin`。仓库配置共 37 个构建入口：九个硬件目标各有本地 Dev、Stable、Nightly 模式，另有四个仅开发板型和六个模拟器；只有上表四个目标具备正式发布资格。版本与 Git 哈希自动生成：Stable 为 `<基础版本>`，Nightly 为 `<基础版本>-rc+<7位SHA>`，Dev 为 `<基础版本>-dev-<分支>-<7位SHA>`。其它板型见[构建文档](./docs/engineering/build-system.md)。
+
+Metalio E-Ink4-Plus（ESP32-S31）使用独立工具链，需 PlatformIO Core 6.2 或以上：
+
+```sh
+PLATFORMIO_CORE_DIR=/tmp/crossmux-s31-pio PLATFORMIO_BUILD_DIR=.pio/build-s31 pio run -e metalio_eink4_plus
+```
+
+1216×684 UI 复用 Read Pico 的高密度布局；8 位并口驱动提供原生 16 级灰度。当前为开发目标，SDK 依赖复现、首次烧录备份要求及实机待验收项见[设备指南](./docs/engineering/metalio-eink4-plus.md)。
 
 X4 Pro 与 Metalio E-Ink 4 构建命令：
 

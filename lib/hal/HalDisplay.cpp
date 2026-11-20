@@ -3,6 +3,8 @@
 
 #if FREEINK_DEVICE_READPICO
 #include <BoardReadPico.h>
+#endif
+#if FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS
 #include <Logging.h>
 #endif
 
@@ -32,6 +34,8 @@ void HalDisplay::begin(bool seamless) {
   if (!BoardReadPico::ready()) {
     LOG_ERR("DISP", "FCA9555 expander is not up; EPD rails cannot be sequenced");
   }
+#endif
+#if FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS
   // epdiy owns 4bpp front/back/difference buffers in PSRAM (~1.59 MiB here),
   // plus the SDK's B/W base and selector planes. Feed queues, DMA buffers and
   // renderer tasks need internal RAM; track free space and largest blocks.
@@ -45,7 +49,7 @@ void HalDisplay::begin(bool seamless) {
 
   einkDisplay.begin();
 
-#if FREEINK_DEVICE_READPICO
+#if FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS
   // The facade publishes the driver's real geometry (EpdiyLcdDriver::geometry():
   // 1216 x 684 -> 152 bytes/row -> 103,968 bytes for Read Pico). Every consumer
   // must read it from here; see the constants note in HalDisplay.h.

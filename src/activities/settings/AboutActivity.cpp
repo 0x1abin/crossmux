@@ -53,10 +53,8 @@ const char* displayControllerName(const BoardConfig::DisplayController c) {
       return "UC8179";
     case BoardConfig::DisplayController::UC8279C:
       return "UC8279C";
-#ifdef SIMULATOR
     case BoardConfig::DisplayController::Epdiy:
       return "EPDiy";
-#endif
   }
   return "?";
 }

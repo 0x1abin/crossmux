@@ -55,12 +55,16 @@ EpdFontFamily control18FontFamily(18, &control18RegularFont, &control18BoldFont)
 
 UITheme UITheme::instance;
 
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+bool UiHighDpiProfile::active() { return UITheme::getInstance().hasMainTabs(); }
+#endif
+
 UITheme::UITheme() {
   auto themeType = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
   setTheme(themeType);
 }
 
-void UITheme::reload() {
+void UITheme::reload(GfxRenderer& renderer) {
   const bool inx = SETTINGS.uiTheme == CrossPointSettings::INX;
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
   (void)inx;
@@ -72,6 +76,7 @@ void UITheme::reload() {
 #endif
   auto themeType = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
   setTheme(themeType);
+  renderer.setProportionalUi(UiHighDpiProfile::enabled && !UiHighDpiProfile::active());
 }
 
 bool UITheme::supportsCoverGrid() { return HalMemory::getPsramHeap().totalBytes > 0; }
@@ -145,7 +150,7 @@ const ThemeMetrics& UITheme::getMetrics() const {
   const bool showButtonHints = currentTheme->buttonHintsVisible();
   if (!metricsValid || showButtonHints != metricsForButtonHints) {
     adjustedMetrics = *currentMetrics;
-    UiHighDpiProfile::apply(adjustedMetrics);
+    if (UiHighDpiProfile::active()) UiHighDpiProfile::apply(adjustedMetrics);
     if (currentType == CrossPointSettings::INX) {
       // The status strip starts below the board's header offset, before the title.
       adjustedMetrics.headerHeight += BoardConfig::ACTIVE.headerOffsetY;
@@ -194,7 +199,7 @@ Rect UITheme::getContentArea(const GfxRenderer& renderer) {
 Rect UITheme::getScreenSafeArea(const GfxRenderer& renderer, bool hasFrontButtonHints, bool hasSideButtonHints) {
   auto orientation = renderer.getOrientation();
   Rect safeArea = getContentArea(renderer);
-#if !FREEINK_DEVICE_READPICO
+#if !(FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS)
   if (currentType == CrossPointSettings::UI_THEME::INX)
     safeArea = Rect{0, 0, renderer.getScreenWidth(), renderer.getScreenHeight()};
 #endif
@@ -236,10 +241,10 @@ Rect UITheme::getHeaderRect(const GfxRenderer& renderer, bool hasFrontButtonHint
               safe.width + renderer.getScreenWidth() - content.width, metrics.headerHeight};
 }
 
-std::string UITheme::getCoverThumbPath(std::string coverBmpPath, int coverHeight) {
+std::string UITheme::getCoverThumbPath(std::string coverBmpPath, int pixelHeight) {
   size_t pos = coverBmpPath.find("[HEIGHT]", 0);
   if (pos != std::string::npos) {
-    coverBmpPath.replace(pos, 8, std::to_string(coverHeight));
+    coverBmpPath.replace(pos, 8, std::to_string(pixelHeight));
   }
   return coverBmpPath;
 }
@@ -277,8 +282,8 @@ int UITheme::getProgressBarHeight() {
 }
 
 int UITheme::getStatusBarTextTopPadding(const GfxRenderer& renderer) {
-  if (!UiHighDpiProfile::enabled) return 0;
-#if FREEINK_DEVICE_READPICO
+  if (!UiHighDpiProfile::active()) return 0;
+#if FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS
   constexpr int textFontId = READER_STATUS_FONT_ID;
 #else
   constexpr int textFontId = SMALL_FONT_ID;

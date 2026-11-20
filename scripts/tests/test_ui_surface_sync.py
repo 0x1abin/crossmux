@@ -231,13 +231,19 @@ int main(){
 #include <cstdint>
 #include <map>
 #include <string>
+#include <utility>
 struct Rect {int x,y,width,height;};
 constexpr int SMALL_FONT_ID=8;
 struct EpdFontFamily {enum Style {REGULAR};};
 struct Glyph {int top=12,height=10;};
 struct Face {bool present=true;Glyph glyph;const Glyph* getGlyph(char,EpdFontFamily::Style)const{return present?&glyph:nullptr;}};
 struct GfxRenderer {
+ bool scaled=false;
  std::map<int,Face> fonts{{SMALL_FONT_ID,{}}};
+ bool isScalingUi()const{return scaled;}
+ std::pair<int,int> getAsciiTextInkY(int fontId,const char* text)const{
+   assert(fontId==SMALL_FONT_ID && std::string(text)=="56%");return {2,11};
+ }
  const auto& getFontMap()const{return fonts;}
  int getFontAscenderSize(int)const{return 16;}
  int getScreenWidth()const{return 480;} int getScreenHeight()const{return 800;}
@@ -299,6 +305,9 @@ int main(){
  }
  BoardConfig::ACTIVE.bottomCornerRadius=0;UITheme::getInstance().inx=false;
  assert(bottomCornerClearance()==32&&layout(r).left==45);
+ r.scaled=true;
+ theme.drawBatteryLeft(r,{0,100,16,8},true);
+ assert(batteryY==103);
 }
 """
         for defines in ((), ("CROSSMUX_UI_PROFILE_HIGH_DPI", "FREEINK_DEVICE_READPICO=1")):

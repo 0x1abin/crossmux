@@ -52,12 +52,18 @@ const int notosans_18_regular=5, notosans_18_bold=6, fallback=7;
 @FONT_BINDINGS@
 Font ui18RegularFont{}, ui18BoldFont{};
 Font offlineReaderFont{&fallback};
+namespace UiHighDpiProfile {constexpr bool enabled=true; bool active();}
+struct GfxRenderer { bool scaled=false; void setProportionalUi(bool value){scaled=value;} };
 struct UITheme {
+ inline static UITheme* instance=nullptr;
+ UITheme() {instance=this;}
+ static UITheme& getInstance() {return *instance;}
  BaseTheme fallbackTheme; std::unique_ptr<BaseTheme> ownedTheme;
  BaseTheme* currentTheme=nullptr; const ThemeMetrics* currentMetrics=nullptr;
  CrossPointSettings::UI_THEME currentType=CrossPointSettings::CLASSIC; bool metricsValid=true;
  static bool supportsCoverGrid(); static bool hasCoverGridHome();
- void setTheme(CrossPointSettings::UI_THEME); void reload();
+ bool hasMainTabs()const {return currentType==CrossPointSettings::INX;}
+ void setTheme(CrossPointSettings::UI_THEME); void reload(GfxRenderer&);
 };
 @METHODS@
 @LABELS@
@@ -65,8 +71,10 @@ int main(){
  static_assert(CrossPointSettings::LYRA_CAROUSEL==4 && CrossPointSettings::INX==5 && CrossPointSettings::COVER_GRID==6);
  for(bool available:{false,true}) for(int saved=0;saved<=6;++saved){
   psram=available; SETTINGS.uiTheme=saved; UITheme theme;
-  theme.reload();
+  GfxRenderer renderer;
+  theme.reload(renderer);
   const bool inx=saved==5;
+  assert(renderer.scaled==!inx);
   assert(ui18RegularFont.data==(inx?&fallback:&notosans_18_regular));
   assert(ui18BoldFont.data==(inx?&fallback:&notosans_18_bold));
   assert(ui10RegularFont.data==&ubuntu_10_regular && ui10BoldFont.data==&ubuntu_10_bold);
@@ -79,14 +87,14 @@ int main(){
   assert(values[4]==StrId::STR_THEME_LYRA_CAROUSEL && values[5]==StrId::STR_THEME_INX);
   if(psram) assert(values[6]==StrId::STR_THEME_COVER_GRID);
  }
- oom=true; SETTINGS.uiTheme=6; UITheme theme; theme.setTheme(CrossPointSettings::COVER_GRID);
+ oom=true; SETTINGS.uiTheme=5; UITheme theme; GfxRenderer renderer; theme.reload(renderer);
  assert(theme.currentTheme==&theme.fallbackTheme && theme.currentType==CrossPointSettings::CLASSIC);
- assert(SETTINGS.uiTheme==6 && !smallInx);
+ assert(SETTINGS.uiTheme==5 && !smallInx && renderer.scaled);
 }
 '''
 for key, value in {'ENUM':enum,'IDS':','.join(ids),'LABELS':label_method,
  'FONT_BINDINGS':'\n'.join(re.findall(r'^EpdFont ui(?:10|12)(?:Regular|Bold)Font\(&ubuntu_[^\n]+', ui, re.M)),
- 'METHODS':'\n'.join(method(ui, name) for name in ['bool UITheme::supportsCoverGrid(', 'bool UITheme::hasCoverGridHome(', 'void UITheme::setTheme(', 'void UITheme::reload('])}.items():
+ 'METHODS':'\n'.join(method(ui, name) for name in ['bool UiHighDpiProfile::active(', 'bool UITheme::supportsCoverGrid(', 'bool UITheme::hasCoverGridHome(', 'void UITheme::setTheme(', 'void UITheme::reload('])}.items():
     program=program.replace('@'+key+'@',value)
 with tempfile.TemporaryDirectory(prefix='cover-grid-') as tmp:
     source=Path(tmp)/'check.cpp'; binary=Path(tmp)/'check';source.write_text(program)

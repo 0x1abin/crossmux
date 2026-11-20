@@ -414,7 +414,7 @@ void SettingsActivity::onRowAction(const fui::ActionEvent& event) {
 void SettingsActivity::onExit() {
   Activity::onExit();
 
-  UITheme::getInstance().reload();  // Re-apply theme in case it was changed
+  UITheme::getInstance().reload(renderer);  // Re-apply theme in case it was changed
 }
 
 void SettingsActivity::applyUiSettingChange(uint8_t CrossPointSettings::* valuePtr) {
@@ -426,7 +426,12 @@ void SettingsActivity::applyUiSettingChange(uint8_t CrossPointSettings::* valueP
   {
     RenderLock lock(*this);
     const bool hadMainTabs = UITheme::getInstance().hasMainTabs();
-    UITheme::getInstance().reload();
+    const bool oldScale = renderer.usesProportionalUi();
+    UITheme::getInstance().reload(renderer);
+    if (oldScale != renderer.usesProportionalUi()) {
+      mappedInput.discardBufferedTouch();
+      renderer.requestNextFullRefresh();
+    }
     if (hadMainTabs != UITheme::getInstance().hasMainTabs()) {
       activityManager.goToSettings(UITheme::getInstance().hasMainTabs() ? SettingsSection::End
                                                                         : SettingsSection::Display);

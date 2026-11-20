@@ -38,6 +38,7 @@ Rect painted;
 struct Renderer{
  enum Orientation{Portrait,LandscapeClockwise,PortraitInverted,LandscapeCounterClockwise};
  Orientation orientation=Portrait;
+ int toNativeUiLength(int px)const{return px;}
  int getScreenWidth()const{return 640;}
  int getScreenHeight()const{return 960;}
  Orientation getOrientation()const{return orientation;}

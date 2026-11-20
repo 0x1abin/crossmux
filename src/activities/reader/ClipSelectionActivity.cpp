@@ -71,6 +71,7 @@ ClipSelectionActivity::ClipSelectionActivity(GfxRenderer& renderer, MappedInputM
       mode(Mode::DefinitionLookup) {}
 
 void ClipSelectionActivity::onEnter() {
+  const GfxRenderer::PixelScope physical(renderer);
   Activity::onEnter();
   std::string dictionaryPath;
   lookupAvailable =
@@ -494,6 +495,7 @@ void ClipSelectionActivity::loop() {
 
   int touchX = 0;
   int touchY = 0;
+  const GfxRenderer::PixelScope physical(renderer);
   if (ignoreInitialTouch) {
     if (!mappedInput.isScreenTouchHeld(touchX, touchY)) ignoreInitialTouch = false;
     return;
@@ -832,6 +834,7 @@ void ClipSelectionActivity::render(RenderLock&&) {
     return;
   }
 
+  const GfxRenderer::PixelScope physical(renderer);
   if (renderIncremental()) {
     return;
   }

@@ -77,6 +77,7 @@ class ReaderToolbarUi : public UiAppHost {
   int visibleRows() const { return nav_.pageRows(); }
 
  private:
+  const GfxRenderer& renderer_;
   static void screenFn(UiScreen& screen, void* user);
   static void onAction(const freeink::ui::ActionEvent& event, void* user);
   void buildToolbar(UiScreen& screen);

@@ -96,7 +96,7 @@ inline freeink::ui::ThemeTokens uiThemeTokens(const freeink::ui::GfxRendererTarg
     tokens.listEmphasizedText.bold = true;
     tokens.listValueText = tokens.bodyText;
   }
-  if (UiHighDpiProfile::enabled) {
+  if (UiHighDpiProfile::active()) {
     tokens.minTouchSize = UiHighDpiProfile::buttonHeight;
     tokens.rowHeight = UiHighDpiProfile::rowHeight;
     tokens.listMinRowHeight = UiHighDpiProfile::rowHeight;

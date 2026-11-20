@@ -92,7 +92,7 @@ inline freeink::ui::GfxRendererTarget makeUiTarget(const GfxRenderer& renderer, 
 // 24 for single-line rows, 32 for label+subtitle rows.
 inline freeink::ui::BitmapRef listIconFor(const UIIcon icon, const int size = 24) {
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
-  if (size >= 48 || UiHighDpiProfile::enabled) {
+  if (size >= 48 || UiHighDpiProfile::active()) {
     switch (icon) {
       case UIIcon::Settings:
         return freeink::ui::bitmapFromIcon(icon_settings_2_48);

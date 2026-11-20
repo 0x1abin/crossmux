@@ -181,7 +181,7 @@ typedef struct {
 EPD_PACKED_END
 
 /// Data stored for FONT AS A WHOLE
-typedef struct {
+typedef struct EpdFontData {
   const uint8_t* bitmap;                ///< Glyph bitmaps, concatenated
   const EpdGlyph* glyph;                ///< Glyph array
   const EpdUnicodeInterval* intervals;  ///< Valid unicode intervals for this font
