@@ -1,4 +1,4 @@
-# Metalio E-Ink4 Plus development target
+# Metalio E-Ink4 Plus
 
 The beta port starts at CrossMux `b0641c5b30b7d0ae8f0fc4fa3d2d1c5d769214d2`.
 It carries the board changes from [CrossPoint Plus `ea534874`](https://github.com/crosspoint-reader/crosspoint-reader/tree/ea534874bd60074058b8862c0f57bf59def1f0ee)
@@ -62,7 +62,17 @@ Core directory separate from the other target's ESP-IDF toolchain. Build
 checks cover the waveform, framebuffer transaction, touch sampling and
 cross-screen cancellation, startup logs, USB routing and eject, radio admission
 and target isolation.
-The target is for local development.
+The official channel is Nightly, built with `metalio_eink4_plus_nightly`.
+The Web installer uses the `metalio_eink4_plus` catalog entry.
+
+For first installation, the Web tool verifies a complete 16 MiB backup and
+requires confirmation that the backup was saved. It installs the app at
+`0x10000`, the matching bootloader at `0x2000`, OTA data at `0xe000`, and
+the partition table at `0x8000` last. The installation writes leave the
+first two Flash sectors and NVS untouched. An existing installation with
+the matching bootloader and CrossMux partition table uses the inactive
+app slot. Keep the complete backup for offline recovery with the S31
+toolchain.
 
 The upstream beta needs a bootloader from the same ESP-IDF build to avoid
 LCD feed underruns. The November 10 evidence retains the two matching 16 MiB
@@ -99,8 +109,9 @@ That reader booted with 16 MiB PSRAM, but the display showed horizontal bands.
 Restoring the verified full 16 MiB factory backup cleared the bands and restored
 touch on stock firmware 2.0.79.
 
-The stock 5 MiB app slots do not fit the current development app. The probe,
-bench layout and restore evidence are historical references, not first-install
-instructions or acceptance of the current EPDiy build. The probe's 4-bit SDMMC
-assumption does not override the current 1-bit configuration. Track public
-installer and recovery validation in [#333](https://github.com/0x1abin/crossmux/issues/333).
+The stock 5 MiB app slots require migration to the CrossMux partition layout.
+For Web acceptance, use a Plus test unit with a verified recovery image,
+install from the stock layout, confirm the running version after reboot,
+update to the inactive slot and verify offline recovery from the backup.
+Record the firmware hash and check the reserved Flash sectors and NVS.
+Track installer and recovery validation in [#333](https://github.com/0x1abin/crossmux/issues/333).

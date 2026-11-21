@@ -237,7 +237,8 @@ int main() {
                     self.assertIn("CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY=y", resolve(section, "custom_sdkconfig"))
                     self.assertIn("CONFIG_BT_CONTROLLER_ONLY=y", resolve(section, "custom_sdkconfig"))
         self.assertEqual(hardware_environments, {
-            "default", "gh_release", "gh_release_rc", "x4c", "lilygo_t5s3", "picco", "metalio_eink4_plus",
+            "default", "gh_release", "gh_release_rc", "x4c", "lilygo_t5s3", "picco",
+            "metalio_eink4_plus", "metalio_eink4_plus_nightly",
             *{
                 environment
                 for board in ("sticky", "x4pro", "papermono", "eego_a4", "murphy_m4",

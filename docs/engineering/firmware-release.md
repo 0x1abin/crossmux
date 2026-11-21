@@ -2,7 +2,7 @@
 
 CrossMux has two release channels, `stable` and `nightly`, managed by one
 channel-aware pipeline. Stable publishes four targets: the shared X3/X4 image,
-Sticky, X4 Pro and Metalio E-Ink 4. Nightly publishes all nine targets. Local
+Sticky, X4 Pro and Metalio E-Ink 4. Nightly publishes ten targets. Local
 build modes do not grant publication eligibility. X4 Classic and LilyGo remain
 development-only.
 
@@ -28,6 +28,12 @@ Its full-install package uses the existing 16 MB S3 partition
 profile. The Web flasher displays it as **MindReset Read Pico**. First installation replaces the factory partition layout
 and requires a complete Flash backup. See [Read Pico](read-pico.md) for hardware
 evidence and the outstanding physical acceptance checks.
+
+Metalio E-Ink4 Plus publishes only Nightly as `metalio-eink4-plus` from
+`metalio_eink4_plus_nightly`. The S31 reserves the first two Flash sectors,
+so its bootloader starts at `0x2000`. The other three segments use the
+shared 16 MiB partition layout. See [Metalio E-Ink4 Plus](metalio-eink4-plus.md)
+for the installer and bench acceptance criteria.
 
 ### Firmware-write progress rendering
 
@@ -125,7 +131,7 @@ version of an obsolete build prefix rather than leaving hidden historical object
 ### Branch rehearsal
 
 Manual dispatch accepts `dry_run` (boolean, default `false`). Enable it to build
-all nine Nightly targets on a branch and run the same packaging and two-region
+all ten Nightly targets on a branch and run the same packaging and two-region
 index validation without any GitHub Release or COS writes or cleanup. Build notes
 record the actual branch. Rehearsals have a separate concurrency group, so they
 do not serialize with production publishing. Firmware packages and both indexes

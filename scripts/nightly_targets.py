@@ -147,6 +147,22 @@ TARGETS = {
         'supportedChannels': ['stable', 'nightly'],
         'fullInstall': True,
     },
+    'metalio_eink4_plus': {
+        'name': 'Metalio E-Ink4 Plus',
+        'devices': [{'model': 'metalio_eink4_plus', 'name': 'Metalio E-Ink4 Plus', 'resolution': '684 × 1216'}],
+        'partitionProfile': 'crossmux-sticky-v1',
+        'flash': {'size': 0x1000000, 'mode': 'dio', 'frequency': '80m'},
+        'usbFilters': [{'usbVendorId': 0x303A}],
+        'installStrategy': 'metalio-plus',
+        'deviceSlug': 'metalio-eink4-plus',
+        'models': ['metalio_eink4_plus'],
+        'boardTag': 'metalio_eink4_plus',
+        'chip': 'ESP32-S31',
+        'chipId': 0x0020,
+        'environments': {'nightly': 'metalio_eink4_plus_nightly'},
+        'supportedChannels': ['nightly'],
+        'fullInstall': True,
+    },
     'readpico': {
         'factoryOptions': [{
             'id': 'factory',
@@ -180,6 +196,17 @@ TARGETS = {
 
 FLAVOR_TOKENS = {'global': 'global', 'zh-CN': 'cn'}
 CHANNELS = ('stable', 'nightly')
+
+
+def install_segments(target_id):
+    # S31 reserves the first two Flash sectors for its ROM.
+    bootloader_offset = 0x2000 if TARGETS[target_id]['chip'] == 'ESP32-S31' else 0
+    return (
+        ('bootloader', 'bootloader.bin', bootloader_offset, 0x8000 - bootloader_offset),
+        ('partitions', 'partitions.bin', 0x8000, 0x1000),
+        ('boot_app0', 'boot_app0.bin', 0xE000, 0x2000),
+        ('firmware', 'firmware.bin', 0x10000, 0x640000),
+    )
 
 
 def targets_for(channel):

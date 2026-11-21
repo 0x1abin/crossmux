@@ -130,10 +130,13 @@ jobs:
       - name: Isolate the S31 toolchain
         run: |
           echo "PLATFORMIO_CORE_DIR=$RUNNER_TEMP/.platformio-s31-$GITHUB_RUN_ID-$GITHUB_JOB" >> "$GITHUB_ENV"
-          echo "PLATFORMIO_BUILD_DIR=$GITHUB_WORKSPACE/.pio/build-s31" >> "$GITHUB_ENV"
           echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
-      - name: Build development firmware
-        run: pio run -e metalio_eink4_plus
+      - name: Build and verify Plus Nightly package
+        run: |
+          set -euo pipefail
+          pio run -e metalio_eink4_plus_nightly
+          python3 scripts/package_nightly_target.py metalio_eink4_plus --channel nightly
+          (cd dist/nightly/metalio_eink4_plus && sha256sum --check *-SHA256SUMS)
       - name: Check Plus display and input contracts
         run: |
           python3 -m unittest discover -s scripts/tests -p test_metalio_eink4_plus.py
@@ -187,7 +190,7 @@ jobs:
       - name: Build simulators and hardware
         run: |
           set -euo pipefail
-          mapfile -t release_environments < <(python3 -c 'import sys; sys.path.insert(0, "scripts"); from nightly_targets import matrix; print("\n".join(entry["environment"] for entry in matrix("nightly")["include"]))')
+          mapfile -t release_environments < <(python3 -c 'import sys; sys.path.insert(0, "scripts"); from nightly_targets import matrix; print("\n".join(entry["environment"] for entry in matrix("nightly")["include"] if entry["targetId"] != "metalio_eink4_plus"))')
           test "${#release_environments[@]}" -gt 0
           build_args=()
           for environment in "${release_environments[@]}"; do build_args+=(-e "$environment"); done
@@ -217,7 +220,7 @@ jobs:
       - name: Verify hardware packages
         run: |
           set -euo pipefail
-          mapfile -t targets < <(python3 -c 'import sys; sys.path.insert(0, "scripts"); from nightly_targets import targets_for; print("\n".join(targets_for("nightly")))')
+          mapfile -t targets < <(python3 -c 'import sys; sys.path.insert(0, "scripts"); from nightly_targets import targets_for; print("\n".join(target for target in targets_for("nightly") if target != "metalio_eink4_plus"))')
           test "${#targets[@]}" -gt 0
           for target in "${targets[@]}"; do
             python3 scripts/package_nightly_target.py "$target" --channel nightly

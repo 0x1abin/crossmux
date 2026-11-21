@@ -129,6 +129,7 @@ jobs:
         run: uv pip install --system -U pioarduino==6.2.0
 
       - name: Prepare platform tools
+        if: matrix.targetId != 'metalio_eink4_plus'
         run: python scripts/patch_pioarduino_cache.py --prepare-platform
       - name: Build unified target
         run: pio run -e "${{ matrix.environment }}"
