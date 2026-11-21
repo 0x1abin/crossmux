@@ -20,16 +20,11 @@ from nightly_targets import (
     asset_name,
     bundle_name,
     environment_for,
+    install_segments,
     manifest_name,
     matrix,
     public_target,
     version_for,
-)
-FULL_INSTALL_SEGMENTS = (
-    ('bootloader', 'bootloader.bin', 0x0000),
-    ('partitions', 'partitions.bin', 0x8000),
-    ('boot_app0', 'boot_app0.bin', 0xE000),
-    ('firmware', 'firmware.bin', 0x10000),
 )
 EXPECTED_PARTITIONS = {
     'otadata': (0xE000, 0x2000),
@@ -98,7 +93,7 @@ def copy_asset(source, destination):
     shutil.copyfile(source, destination)
 
 
-def verify_firmware(path, chip_id, board_tag, expected_version=None):
+def verify_image_chip(path, chip_id):
     with path.open('rb') as stream:
         header = stream.read(24)
         if len(header) != 24 or header[0] != 0xE9:
@@ -109,11 +104,16 @@ def verify_firmware(path, chip_id, board_tag, expected_version=None):
                 f'{path.name} chip ID is 0x{actual_chip_id:04x}, expected 0x{chip_id:04x}'
             )
 
-        marker = f'CROSSPOINT-BOARD-V1:{board_tag};'.encode()
-        version_marker = expected_version.encode() + b'\0' if expected_version is not None else None
-        found_board = False
-        found_version = version_marker is None
-        overlap = b''
+
+def verify_firmware(path, chip_id, board_tag, expected_version=None):
+    verify_image_chip(path, chip_id)
+    marker = f'CROSSPOINT-BOARD-V1:{board_tag};'.encode()
+    version_marker = expected_version.encode() + b'\0' if expected_version is not None else None
+    found_board = False
+    found_version = version_marker is None
+    overlap = b''
+    with path.open('rb') as stream:
+        stream.seek(24)
         while chunk := stream.read(64 * 1024):
             data = overlap + chunk
             if marker in data:
@@ -139,21 +139,26 @@ def package_target(root, target_id, channel, output):
     verify_partition_binary(build / 'partitions.bin')
 
     assets = []
-    for role, source_name, offset in FULL_INSTALL_SEGMENTS:
+    for role, source_name, offset, max_size in install_segments(target_id):
         source = find_boot_app0() if role == 'boot_app0' else build / source_name
         destination = output / asset_name(target_id, source_name)
         copy_asset(source, destination)
+        size = destination.stat().st_size
+        if not 0 < size <= max_size:
+            raise SystemExit(f'{destination.name} has invalid size for its flash region')
+        if target['chip'] == 'ESP32-S31' and role == 'bootloader':
+            verify_image_chip(destination, target['chipId'])
+        if target['chip'] == 'ESP32-S31' and role == 'boot_app0' and size != max_size:
+            raise SystemExit(f'{destination.name} must cover both OTA data sectors')
         assets.append({
             'role': role,
             'name': destination.name,
             'offset': offset,
-            'size': destination.stat().st_size,
+            'size': size,
             'sha256': sha256(destination),
         })
 
     firmware = next(output / asset['name'] for asset in assets if asset['role'] == 'firmware')
-    if firmware.stat().st_size > EXPECTED_PARTITIONS['app0'][1]:
-        raise SystemExit(f'{firmware.name} exceeds the OTA app slot')
     config = configparser.ConfigParser()
     config.read(root / 'platformio.ini')
     short_sha = git_value(root, 'rev-parse', '--short=7', 'HEAD')

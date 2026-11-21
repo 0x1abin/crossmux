@@ -31,7 +31,7 @@ class BuildModesTest(unittest.TestCase):
             'simulator_murphy_m4', 'simulator_readpico',
         }
         released = {environment for target in TARGETS.values() for environment in target['environments'].values()}
-        self.assertEqual(len(released), 18)
+        self.assertEqual(len(released), 19)
         self.assertEqual(
             {name.removeprefix('env:') for name in self.config.sections() if name.startswith('env:')},
             development | simulators | released,
@@ -49,6 +49,8 @@ class BuildModesTest(unittest.TestCase):
                 self.assertIn('${' + mode_section + '.build_flags}', environment['build_flags'])
                 self.assertNotIn('CROSSPOINT_VERSION', environment['build_flags'])
         for target in TARGETS.values():
+            if 'stable' not in target['environments']:
+                continue
             stable = self.config['env:' + target['environments']['stable']]['extends'].split(', ')[0]
             nightly = self.config['env:' + target['environments']['nightly']]['extends'].split(', ')[0]
             self.assertEqual(stable, nightly)

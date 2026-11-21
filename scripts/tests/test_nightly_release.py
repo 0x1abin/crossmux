@@ -273,7 +273,11 @@ class NightlyTargetTest(unittest.TestCase):
                         chip_id=target['chipId'], board=target['boardTag'], version=version
                     ).read_bytes())
                     boot_app0 = root / 'boot_app0.bin'
-                    boot_app0.write_bytes(b'boot_app0')
+                    boot_app0.write_bytes(bytes(0x2000))
+                    if target_id == 'metalio_eink4_plus':
+                        (build / 'bootloader.bin').write_bytes(
+                            self.write_image(chip_id=0x20).read_bytes()
+                        )
                     (root / 'platformio.ini').write_text('[crosspoint]\nversion = 1.6.0\n')
                     output = root / 'dist' / target_id
 
@@ -307,6 +311,9 @@ class NightlyTargetTest(unittest.TestCase):
                     )
                     self.assertEqual([asset['role'] for asset in manifests[0]['assets']],
                                      ['bootloader', 'partitions', 'boot_app0', 'firmware'])
+                    if target_id == 'metalio_eink4_plus':
+                        self.assertEqual([asset['offset'] for asset in manifests[0]['assets']],
+                                         [0x2000, 0x8000, 0xE000, 0x10000])
                     self.assertEqual(manifests[0]['channel'], channel)
                     self.assertEqual(manifests[0]['version'], version)
                     self.assertEqual(manifests[0]['supportedChannels'], target['supportedChannels'])
@@ -756,8 +763,8 @@ class PublishedNightlyTest(unittest.TestCase):
             version = '1.5.8' if channel == 'stable' else f'1.5.7-rc+{self.current_sha[:7]}'
             assets = []
             contents = {}
-            for role, name, offset in verify_nightly_release.expected_assets(target_id, channel):
-                data = f'{target_id}/{role}'.encode()
+            for role, name, offset, _max_size in verify_nightly_release.expected_assets(target_id):
+                data = bytes(0x2000) if target['chip'] == 'ESP32-S31' and role == 'boot_app0' else f'{target_id}/{role}'.encode()
                 contents[name] = data
                 self.store[self.release_url + name] = data
                 assets.append({
@@ -828,8 +835,8 @@ class PublishedNightlyTest(unittest.TestCase):
         )
         self.assertEqual(result['targets'], len(nightly_targets.TARGETS))
         self.assertEqual(result['currentTargets'], len(nightly_targets.TARGETS))
-        self.assertEqual(result['assets'], 36)
-        self.assertEqual(result['bundles'], 9)
+        self.assertEqual(result['assets'], 40)
+        self.assertEqual(result['bundles'], 10)
         for url in self.store:
             if url.endswith(('.bin', '.zip')):
                 self.assertEqual(self.fetches[url], 1)
@@ -887,7 +894,7 @@ class PublishedNightlyTest(unittest.TestCase):
                         verify_nightly_release.urllib.request, 'urlopen', side_effect=AssertionError('network')
                     ), mock.patch('builtins.print') as output:
                         verify_nightly_release.main()
-                    self.assertIn('16 assets plus 4 ZIP bundles' if channel == 'stable' else '36 assets plus 9 ZIP bundles',
+                    self.assertIn('16 assets plus 4 ZIP bundles' if channel == 'stable' else '40 assets plus 10 ZIP bundles',
                                   output.call_args.args[0])
 
     def test_local_missing_ambiguous_or_corrupt_artifacts_fail_without_remote_fallback(self):

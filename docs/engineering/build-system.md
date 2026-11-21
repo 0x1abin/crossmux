@@ -74,7 +74,7 @@ prebuilt `dio_opi` core continues to supply the TinyUSB CDC/MSC component graph.
   * `murphy_m4`: Murphy M4 ESP32-S3 experimental development build
   * `waveshare_epaper_397`: Waveshare ePaper 3.97 ESP32-S3 experimental development build
   * `metalio_eink4`: Metalio E-Ink 4 ESP32-S3 development build
-  * `metalio_eink4_plus`: ESP32-S31 development build; use `PLATFORMIO_CORE_DIR=/tmp/crossmux-s31-pio` and PlatformIO Core 6.2+
+  * `metalio_eink4_plus` and `metalio_eink4_plus_nightly`: ESP32-S31 development and Nightly builds. Use an isolated `PLATFORMIO_CORE_DIR` and PlatformIO Core 6.2+.
   * `readpico`: MindReset Read Pico ESP32-S3 development build
   * `lilygo_t5s3`: LilyGo T5 S3 4.7 PRO/Lite ESP32-S3 build-only development build
   * `picco`: BOOX Picco ESP32-S3 development build, stock partitions and app-only upload
@@ -85,9 +85,7 @@ prebuilt `dio_opi` core continues to supply the TinyUSB CDC/MSC component graph.
   * `simulator_readpico`: Native 1216x684 Read Pico simulator, 684x1216 in portrait
   * `simulator_sticky`: Native Sticky desktop simulator
 
-The committed configuration has 36 environments: development, Stable and Nightly
-for each of the nine published targets, development-only `x4c`, `lilygo_t5s3` and `picco`,
-and six simulators. S3 Stable environments use `<board>-gh_release`; Nightly uses
+The S3 Stable environments use `<board>-gh_release`. Nightly uses
 `<board>_nightly`. `mode_dev`, `mode_stable` and `mode_nightly` supply common
 logging and version policy; hardware profiles retain their SDK configuration,
 dependencies and USB behavior. There are no duplicate S3 RC, slim, rollback or
