@@ -53,9 +53,9 @@ Manual flashing must use the matching build; the embedded
 board tag rejects a tagged image for a different board. See
 [firmware-release.md](firmware-release.md) for publishing and rollback details.
 
-### Metalio E-Ink4-Plus development target
+### Metalio E-Ink4 Plus Nightly target
 
-[Metalio E-Ink4-Plus](metalio-eink4-plus.md) is ESP32-S31 (RISC-V), a separate MCU family and firmware image. It uses Arduino-ESP32 4 / ESP-IDF 6.1 in an isolated PlatformIO package directory. Its 1216×684 geometry, high-density UI and native sixteen-level API match Read Pico at the application boundary; its 8-bit LCD bus, TPS65185 power, FT6336U input and shutdown sequence remain board-owned. It is outside public Stable/Nightly/OTA indexes and has no physical acceptance recorded for this port.
+[Metalio E-Ink4 Plus](metalio-eink4-plus.md) is ESP32-S31 (RISC-V), a separate MCU family and firmware image. It uses Arduino-ESP32 4 / ESP-IDF 6.1 in an isolated PlatformIO package directory. Its 1216×684 geometry, high-density UI and native sixteen-level API match Read Pico at the application boundary; its 8-bit LCD bus, TPS65185 power, FT6336U input and shutdown sequence remain board-owned. The official image is Nightly-only.
 
 ### BOOX Picco development target
 

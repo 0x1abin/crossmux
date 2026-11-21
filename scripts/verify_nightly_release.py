@@ -18,14 +18,13 @@ from build_nightly_index import valid_manifest
 from generate_ota_notes import validate_notes
 from nightly_targets import (
     CHANNELS, FLAVOR_TOKENS, TARGETS, asset_name, bundle_name, manifest_name,
-    public_target, targets_for,
+    install_segments, public_target, targets_for,
 )
 
 
 SHA40 = re.compile(r'^[0-9a-f]{40}$')
 SHA256 = re.compile(r'^[0-9a-f]{64}$')
 ASSET_NAME = re.compile(r'^[a-z0-9][a-z0-9._-]*\.bin$')
-OFFSETS = {'bootloader': 0x0000, 'partitions': 0x8000, 'boot_app0': 0xE000, 'firmware': 0x10000}
 
 
 def fetch_bytes(url, attempts=3):
@@ -76,8 +75,9 @@ def validate_url(url, index_url, channel):
         raise ValueError(f'published URL is outside the expected release path: {url}')
 
 
-def expected_assets(target_id, channel):
-    return [(role, asset_name(target_id, f'{role}.bin'), offset) for role, offset in OFFSETS.items()]
+def expected_assets(target_id):
+    return [(role, asset_name(target_id, name), offset, max_size)
+            for role, name, offset, max_size in install_segments(target_id)]
 
 
 def verify_bundle(entry, target_id, version, index_url, channel, manifests, fetch):
@@ -196,23 +196,25 @@ def verify_release(index_url, expected_sha, channel, fetch=fetch_bytes):
             raise ValueError(f'{target_id} compatibility manifests differ beyond flavor')
         current_targets += 1
 
-        expected = expected_assets(target_id, channel)
+        expected = expected_assets(target_id)
         seen_urls = set()
-        role_urls = {role: set() for role, _name, _offset in expected}
+        role_urls = {role: set() for role, _name, _offset, _max_size in expected}
         for flavor, manifest in manifests.items():
             assets = manifest['assets']
             if len(assets) != len(expected):
                 raise ValueError(f'{target_id}/{flavor} has an unexpected asset count')
-            for asset, (role, neutral_name, offset) in zip(assets, expected):
+            for asset, (role, neutral_name, offset, max_size) in zip(assets, expected):
                 name = asset.get('name') if isinstance(asset, dict) else None
                 if not isinstance(asset, dict) or asset.get('role') != role or not isinstance(
                     name, str
                 ) or not ASSET_NAME.fullmatch(name) or name != neutral_name or asset.get(
                     'offset'
-                ) != offset or type(asset.get('size')) is not int or asset['size'] <= 0 or not SHA256.fullmatch(
+                ) != offset or type(asset.get('size')) is not int or not 0 < asset['size'] <= max_size or not SHA256.fullmatch(
                     str(asset.get('sha256', ''))
                 ):
                     raise ValueError(f'{target_id}/{flavor} has an invalid {role} asset')
+                if TARGETS[target_id]['chip'] == 'ESP32-S31' and role == 'boot_app0' and asset['size'] != max_size:
+                    raise ValueError(f'{target_id}/{flavor} boot_app0 must cover both OTA data sectors')
                 asset_url = urljoin(manifest_urls[flavor], name)
                 validate_url(asset_url, index_url, channel)
                 role_urls[role].add(asset_url)
