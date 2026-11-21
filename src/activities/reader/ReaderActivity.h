@@ -5,6 +5,7 @@
 #include <string>
 #include <utility>
 
+#include "BookStyleStore.h"
 #include "EndOfBookOptions.h"
 #include "ReaderSession.h"
 #include "activities/Activity.h"
@@ -76,6 +77,39 @@ class ReaderActivity : public Activity {
   virtual void renderBook() = 0;
   virtual void applyInitialOrientation();
   virtual void onEndOfBookRendered() {}
+
+  // Per-book style restore (see BookStyleStore). applyBookStyle() runs
+  // before loadBook(); saveBookStyle() runs on exit. A book's overrides are
+  // applied to the in-memory settings only; the values from the settings
+  // screen are snapshotted first and restored on exit, so the global settings
+  // (and their persisted file) are never overwritten by a book's overrides.
+  void applyBookStyle();
+  void saveBookStyle();
+  // Builds the effective override set from the difference between the current
+  // in-memory settings and the entered global snapshot. The text settings
+  // result handler uses this to capture a session's edits as this book's
+  // overrides; a field reverted to the global value clears its bit ("follow
+  // global").
+  BookStyle captureStyleDiff(const BookStyle& globalSnapshot) const;
+
+  // Persists the typography edits of the current session as this book's
+  // overrides, then puts the global snapshot back so they never reach the
+  // global settings file. Every path that edits text settings in the reader
+  // (the reader menu, the reader toolbar and its font page) goes through here,
+  // so both menus behave identically. With memory off, or with no snapshot,
+  // there is nothing book-scoped: the caller persists the edits as global.
+  // Returns true when the edits were turned into book overrides.
+  bool persistBookStyleEdits();
+  // Saves SETTINGS for a change that is NOT a typography edit (night mode,
+  // frontlight, orientation, image scaling, font preload state). With memory
+  // on, SETTINGS holds this book's overrides at that moment; writing them would
+  // put the book's font into the global settings file. This swaps the entered
+  // global snapshot in for the write and puts the book's live style back
+  // afterwards, so the session keeps rendering with the book's typography.
+  void saveSettingsKeepingBookStyle();
+
+  BookStyle globalSettingsSnapshot_;
+  bool globalSettingsSnapshotted_ = false;
 
   bool handleBackNavigation();
   /** True while the end-of-book suggestion menu is on screen and owning input. */
