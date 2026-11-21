@@ -62,6 +62,11 @@ def main():
         placement += method(sleep, 'bool beginOverlayGrayPlane(')
         custom = sleep[sleep.index('void SleepActivity::renderCustomSleepScreen()'):sleep.index('// Sleep screens paint')]
         bitmap_sleep = sleep[sleep.index('void SleepActivity::renderBitmapSleepScreen('):sleep.index('bool SleepActivity::renderSleepOverlayFile(')]
+        # The two threshold predicates live in a shared header now; the probe needs
+        # their definitions in the same translation unit as the sliced methods.
+        grayscale_source = (ROOT / 'src/util/SleepGrayscale.h').read_text()
+        grayscale = grayscale_source[grayscale_source.index('HalDisplay::GrayscaleMode sleepGrayscaleMode'):]
+        grayscale = grayscale.replace('inline ', '')
         probe = """#include "util/SleepCover.h"
     #include <cmath>
     #include <Logging.h>
@@ -80,7 +85,7 @@ def main():
       void renderBitmapSleepScreen(const Bitmap&, bool = false, bool = false) const;
     };
     """
-        (work / 'SleepProbe.h').write_text(probe + placement +
+        (work / 'SleepProbe.h').write_text(probe + grayscale + placement +
             (custom + bitmap_sleep).replace('SleepActivity::', 'SleepProbe::'))
         # Compile the new viewer's JPEG and publication methods with real renderer/decoder/storage.
         viewer = (ROOT / 'src/activities/util/ImageViewerActivity.cpp').read_text()

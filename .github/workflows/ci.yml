@@ -47,7 +47,8 @@ jobs:
           git diff --exit-code || (echo "Please run 'bin/clang-format-fix' to fix formatting issues" && exit 1)
 
   cppcheck:
-    # PlatformIO's bundled checker requires libpcre3, absent from Ubuntu 26.04.
+    # Pin 24.04: PlatformIO's prebuilt cppcheck links against PCRE1 (libpcre3),
+    # which Ubuntu 26.04 no longer ships, so the binary exits 127 there.
     runs-on: ubuntu-24.04
     steps:
       - name: Isolate PlatformIO toolchains
