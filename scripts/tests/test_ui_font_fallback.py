@@ -1,5 +1,6 @@
 """Execute production fallback selection, setup and unload with small font/I/O seams."""
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -10,6 +11,336 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class UiFontFallbackTest(unittest.TestCase):
+    def test_usb_status_text_keeps_hebrew_and_cjk_without_sd(self):
+        """The USB screen and the handoff popup draw with the flash CJK face.
+
+        That face (notosans_cjk_12, behind NOTOSANS_12_FONT_ID) covers CJK and
+        Latin but no Hebrew, and the SD-backed fallback is unavailable for the
+        whole USB session because the USB host owns the card. The frame guard
+        temporarily detaches SD fallbacks; the subsequent handoff popup selects
+        its flash script face directly. Execute resolveTextFontId() against the
+        real interval tables with no SD font registered, and check that each
+        sample is drawn in a face that actually covers it.
+        """
+        from test_builtin_font_shrink import rows
+
+        fonts = ROOT / 'lib/EpdFont/builtinFonts'
+
+        def intervals(*names):
+            found = []
+            for name in names:
+                found += [(first, last) for first, last, _ in rows((fonts / f'{name}.h').read_text(), 'Intervals')]
+            return found
+
+        # notosans_cjk_12.h embeds the shared common-interval table, so that one
+        # file is the CJK face's real coverage.
+        cjk_face = intervals('notosans_cjk_common_intervals')
+        ui_face = intervals('ubuntu_12_regular')
+        high_ui_face = intervals('notosans_16_regular')
+        high_cjk_face = intervals('notosans_cjk_16')
+        self.assertEqual(ui_face, intervals('ubuntu_12_bold'))
+        self.assertEqual(high_ui_face, intervals('notosans_16_bold'))
+
+        def table(name, values):
+            body = ','.join(f'{{{first}u,{last}u}}' for first, last in values)
+            return f'static const uint32_t {name}[][2]={{{body}}};\n'
+
+        # The two call sites must keep the registration; the runtime check below
+        # then proves what it buys. The USB screen holds it for the whole frame
+        # (UsbFrameFontScope), so the header and the button hints are covered too,
+        # and it restores every mapping it changed instead of leaving them cleared.
+        usb = (ROOT / 'src/activities/network/UsbDriveActivity.cpp').read_text()
+        self.assertIn('renderer_.setFallbackFont(NOTOSANS_12_FONT_ID, UI_12_FONT_ID);', usb)
+        self.assertIn('renderer_.setFallbackFont(NOTOSANS_12_FONT_ID, statusSaved_[0], statusSaved_[1]);', usb)
+        self.assertIn('renderer_.setFallbackFont(kFontIds[i], saved_[i][0], saved_[i][1]);', usb)
+        main = (ROOT / 'src/main.cpp').read_text()
+        popup = method(main, 'static Rect drawStorageHandoffPopup(')
+        self.assertIn('renderer.setFallbackFont(NOTOSANS_12_FONT_ID, UI_12_FONT_ID);', popup)
+
+        scope = method(usb, 'class UsbFrameFontScope') + ';'
+        ids = (ROOT / 'src/SdCardFontSystem.h').read_text()
+        cjk_ids = '\n'.join(re.findall(r'^inline constexpr int CJK_UI_(?:12|16)_FONT_ID =.*$', ids, re.M))
+        rtl_id = re.search(r'^static constexpr int kRtlFontId =.*$', main, re.M).group(0)
+        renderer = (ROOT / 'lib/GfxRenderer/GfxRenderer.cpp').read_text()
+        program = (
+            r'''
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <cstring>
+#include <map>
+#include <set>
+#include <string>
+#define LOG_ERR(...) ((void)0)
+namespace BidiUtils { enum class BidiBaseDir { AUTO }; }
+const char* resolveVisualText(const char* text, std::string&, BidiUtils::BidiBaseDir) { return text; }
+#include "Utf8.h"
+#include "Utf8.cpp"
+#include "fontIds.h"
+#include "components/Rect.h"
+
+'''
+            + table('kCjk', cjk_face)
+            + table('kUi', ui_face)
+            + table('kHighUi', high_ui_face)
+            + table('kHighCjk', high_cjk_face)
+            + cjk_ids + '\n#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI\n' + rtl_id + '\n#endif\n'
+            + r'''
+constexpr int kNotoSans12 = 10;  // NOTOSANS_12_FONT_ID: the flash CJK face
+constexpr int kUi12 = 11;        // UI_12_FONT_ID: the flash Ubuntu face
+
+std::set<uint32_t> coverage(const uint32_t (*table)[2], const size_t count) {
+  std::set<uint32_t> set;
+  for (size_t i = 0; i < count; ++i) {
+    for (uint32_t cp = table[i][0]; cp <= table[i][1]; ++cp) set.insert(cp);
+  }
+  return set;
+}
+
+struct EpdFontFamily {
+  enum Style { REGULAR, BOLD };
+  std::set<uint32_t> coverage;
+  bool hasCodepoint(uint32_t cp, Style) const { return coverage.count(cp) != 0; }
+};
+struct GfxRenderer {
+  std::map<int, EpdFontFamily> fontMap;
+  std::map<int, std::array<int, 2>> fallbackFontMap_;
+  std::map<int, int> preferredFontMap_;
+  std::set<int> sdFonts;
+  std::map<int, int> ttfFonts;
+  bool usedSdFont = false;
+  int measuredFont = 0, drawnFont = 0, displays = 0;
+  bool isSdCardFont(int id) const { return sdFonts.count(id) != 0; }
+  const auto& getTtfFonts() const { return ttfFonts; }
+  void setFallbackFont(int id, int fallback, int backup = 0) { fallbackFontMap_[id] = {fallback, backup}; }
+  std::array<int, 2> getFallbackFont(int id) const {
+    const auto found = fallbackFontMap_.find(id);
+    return found == fallbackFontMap_.end() ? std::array<int, 2>{0, 0} : found->second;
+  }
+  int getScreenWidth() const { return 684; }
+  int getScreenHeight() const { return 1216; }
+  int getLineHeight(int) const { return 24; }
+  int getTextWidth(int id, const char* text, EpdFontFamily::Style style) {
+    measuredFont = resolveTextFontId(id, text, style);
+    usedSdFont |= isSdCardFont(measuredFont);
+    return 96;
+  }
+  void drawText(int id, int, int, const char* text, bool, EpdFontFamily::Style style) {
+    drawnFont = resolveTextFontId(id, text, style);
+    usedSdFont |= isSdCardFont(drawnFont);
+  }
+  template <typename... Args> void fillRect(Args...) {}
+  template <typename... Args> void fillRoundedRect(Args...) {}
+  void displayBuffer() { ++displays; }
+  void ensureSdGlyphsResident(int, const char*, EpdFontFamily::Style, bool) const {}
+  int resolveFontFamilyId(int) const;
+  int resolveTextFontId(int, const char*, EpdFontFamily::Style = EpdFontFamily::REGULAR) const;
+};
+'''
+            + method(renderer, 'int GfxRenderer::resolveFontFamilyId(')
+            + method(renderer, 'int GfxRenderer::resolveTextFontId(')
+            + scope
+            + r'''
+enum class Color { White, Black };
+struct PopupMetrics {
+  int popupMarginX = 12, popupMarginY = 10, popupFrameThickness = 2;
+  bool popupTextBold = false, popupTextInverted = true;
+  float popupTopOffsetRatio = 0.3f;
+  int popupCornerRadius = 0, popupTextBaselineOffsetY = 0;
+};
+struct UITheme {
+  PopupMetrics metrics;
+  static UITheme& getInstance() { static UITheme theme; return theme; }
+  const PopupMetrics& getMetrics() const { return metrics; }
+};
+'''
+            + popup
+            + r'''
+bool faceCovers(const GfxRenderer& r, const int faceId, const char* text) {
+  const auto face = r.fontMap.find(faceId);
+  if (face == r.fontMap.end()) return false;
+  const char* cursor = text;
+  uint32_t cp;
+  while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&cursor)))) {
+    if (!face->second.hasCodepoint(cp, EpdFontFamily::REGULAR)) return false;
+  }
+  return true;
+}
+
+int main() {
+  GfxRenderer r;
+  r.fontMap[kNotoSans12] = {coverage(kCjk, std::size(kCjk))};
+  r.fontMap[kUi12] = {coverage(kUi, std::size(kUi))};
+  // No SD face is registered: beginUsbDrive() detached the card, so anything
+  // the resolver returns has to live in flash.
+
+  const char* kHebrew = "\xD7\x9E\xD7\xA2\xD7\x91\xD7\x99\xD7\xA8";  // מעביר
+  const char* kChinese = "\xE6\xB5\xB7\xE6\xA2\xA6";                  // 海梦
+  const char* kLatin = "USB";
+
+  // Without the registration the Hebrew run is handed to the CJK face, which
+  // has no Hebrew: this is the reported defect.
+  assert(r.resolveTextFontId(kNotoSans12, kHebrew) == kNotoSans12);
+  assert(!faceCovers(r, kNotoSans12, kHebrew));
+
+  // Both call sites register the UI face; the run now resolves to a flash face
+  // that covers every one of its codepoints.
+  r.fallbackFontMap_[kNotoSans12] = {kUi12, 0};
+  assert(r.resolveTextFontId(kNotoSans12, kHebrew) == kUi12);
+  assert(faceCovers(r, kUi12, kHebrew));
+
+  // CJK and Latin keep the CJK face, so the fix does not trade one script for
+  // the other.
+  assert(r.resolveTextFontId(kNotoSans12, kChinese) == kNotoSans12);
+  assert(faceCovers(r, kNotoSans12, kChinese));
+  assert(r.resolveTextFontId(kNotoSans12, kLatin) == kNotoSans12);
+
+  // A style other than REGULAR resolves through the same chain.
+  assert(r.resolveTextFontId(kNotoSans12, kHebrew, EpdFontFamily::BOLD) == kUi12);
+
+  // Exercise the complete popup after the frame guard restores the SD chain.
+  GfxRenderer handoff;
+  constexpr int sd = 9001;
+  handoff.sdFonts.insert(sd);
+  handoff.fontMap[NOTOSANS_12_FONT_ID] = {coverage(kCjk, std::size(kCjk))};
+  handoff.fontMap[sd] = {coverage(kUi, std::size(kUi))};
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+  handoff.fontMap[UI_12_FONT_ID] = {coverage(kHighUi, std::size(kHighUi))};
+  handoff.fontMap[CJK_UI_16_FONT_ID] = {coverage(kHighCjk, std::size(kHighCjk))};
+  handoff.fontMap[CJK_UI_12_FONT_ID] = {coverage(kCjk, std::size(kCjk))};
+  handoff.fontMap[kRtlFontId] = {coverage(kUi, std::size(kUi))};
+  handoff.setFallbackFont(UI_12_FONT_ID, CJK_UI_16_FONT_ID, sd);
+  handoff.setFallbackFont(CJK_UI_16_FONT_ID, CJK_UI_12_FONT_ID);
+  handoff.setFallbackFont(CJK_UI_12_FONT_ID, kRtlFontId);
+#else
+  handoff.fontMap[UI_12_FONT_ID] = {coverage(kUi, std::size(kUi))};
+  handoff.setFallbackFont(UI_12_FONT_ID, sd);
+#endif
+  const auto enteredUi = handoff.getFallbackFont(UI_12_FONT_ID);
+  for (const bool bold : {false, true}) {
+    for (const int radius : {0, 6}) {
+      for (const char* text : {"טוען", "加载中", "Loading..."}) {
+        {
+          UsbFrameFontScope frame(handoff);
+          assert(!handoff.isSdCardFont(handoff.resolveTextFontId(NOTOSANS_12_FONT_ID, text)));
+        }
+        assert(handoff.getFallbackFont(UI_12_FONT_ID) == enteredUi);
+        UITheme::getInstance().metrics.popupTextBold = bold;
+        UITheme::getInstance().metrics.popupCornerRadius = radius;
+        handoff.usedSdFont = false;
+        const int before = handoff.displays;
+        const Rect rect = drawStorageHandoffPopup(handoff, text);
+        assert(!handoff.usedSdFont);
+        assert(handoff.measuredFont == handoff.drawnFont);
+        assert(faceCovers(handoff, handoff.drawnFont, text));
+        assert(handoff.displays == before + 1 && rect.width > 0 && rect.height > 0);
+        assert(handoff.getFallbackFont(UI_12_FONT_ID) == enteredUi);
+      }
+    }
+  }
+}
+'''
+        )
+        for defines in ((), ('CROSSMUX_UI_PROFILE_HIGH_DPI',)):
+            run_cpp(program, include_dirs=(ROOT / 'lib/Utf8', ROOT / 'src'), defines=defines)
+
+    def test_storage_handoff_waits_for_frame_until_restart(self):
+        """The main-loop popup must wait for rendering and hold the lock through reset."""
+        main = (ROOT / 'src/main.cpp').read_text()
+        manager = (ROOT / 'src/activities/ActivityManager.cpp').read_text()
+        program = r'''
+#include <atomic>
+#include <cassert>
+#include <chrono>
+#include <condition_variable>
+#include <cstdio>
+#include <cstdint>
+#include <mutex>
+#include <optional>
+#include <thread>
+#include "activities/RenderLock.h"
+#include "components/Rect.h"
+
+std::mutex eventMutex;
+std::condition_variable event;
+std::atomic<bool> attempted{false}, popupStarted{false}, frameActive{false}, overlap{false};
+std::atomic<bool> popupLocked{false}, delayLocked{false}, usbLocked{false}, resetLocked{false};
+thread_local bool isWorker = false, holdsRender = false;
+struct { std::mutex renderingMutex; } activityManager;
+constexpr int pdTRUE = 1, portMAX_DELAY = -1;
+int xSemaphoreTake(std::mutex& mutex, int ticks) {
+  if (isWorker) {
+    std::lock_guard<std::mutex> signal(eventMutex);
+    attempted = true;
+    event.notify_one();
+  }
+  if (ticks == 0) {
+    if (!mutex.try_lock()) return 0;
+  } else {
+    mutex.lock();
+  }
+  holdsRender = true;
+  return pdTRUE;
+}
+void xSemaphoreGive(std::mutex& mutex) { holdsRender = false; mutex.unlock(); }
+'''
+        program += method(manager, 'RenderLock::RenderLock(Mode')
+        program += method(manager, 'RenderLock::~RenderLock()')
+        program += r'''
+struct GfxRenderer {} renderer;
+enum class SilentRebootTarget { Home };
+bool deepSleepInProgress = false;
+uint32_t silentRebootTarget = 0, silentRebootFontPointSize = 0, silentRebootPayload = 0, silentRebootMagic = 0;
+constexpr uint32_t SILENT_REBOOT_LIGHT_ON = 1, SILENT_REBOOT_MAGIC = 2;
+struct { bool isOn() const { return false; } } Frontlight;
+void delay(unsigned) { delayLocked = holdsRender; }
+void handoffUsbOtgToSerialJtag() { usbLocked = holdsRender; }
+struct { void restart() { resetLocked = holdsRender; } } ESP;
+#define LOG_DBG(...) ((void)0)
+#define STR_LOADING_POPUP 1
+#define tr(id) "loading"
+static Rect drawStorageHandoffPopup(GfxRenderer&, const char*) {
+  std::lock_guard<std::mutex> signal(eventMutex);
+  overlap = frameActive.load();
+  popupLocked = holdsRender;
+  popupStarted = true;
+  event.notify_one();
+  return Rect{};
+}
+'''
+        program += method(main, 'void restartToHomeAfterStorageHandoff()')
+        program += r'''
+int main() {
+  std::optional<RenderLock> frame(std::in_place);
+  frameActive = true;
+  std::thread worker([] {
+    isWorker = true;
+    restartToHomeAfterStorageHandoff();
+  });
+  {
+    std::unique_lock<std::mutex> wait(eventMutex);
+    assert(event.wait_for(wait, std::chrono::seconds(5), [] {
+      return attempted.load() || popupStarted.load();
+    }));
+  }
+  if (attempted) {
+    assert(!popupStarted);
+    frameActive = false;
+    frame.reset();
+    worker.join();
+  } else {
+    worker.join();
+    frameActive = false;
+    frame.reset();
+  }
+  std::fprintf(stderr, "handoff overlap=%d popupLock=%d delayLock=%d usbLock=%d resetLock=%d\n",
+               overlap.load(), popupLocked.load(), delayLocked.load(), usbLocked.load(), resetLocked.load());
+  assert(!overlap && popupLocked && delayLocked && usbLocked && resetLocked);
+}
+'''
+        run_cpp(program, include_dirs=(ROOT / 'src',))
+
+
     def test_high_dpi_whole_run_coverage(self):
         from test_builtin_font_shrink import rows
         directory = ROOT / 'lib/EpdFont/builtinFonts'
