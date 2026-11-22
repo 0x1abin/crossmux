@@ -221,6 +221,11 @@ add_test(NAME SettingsApiKeys COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/se
 add_test(NAME HalTiltGestures
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/hal_tilt/test_hal_tilt.py)
 
+add_test(NAME AutomaticOrientation COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/hal_tilt/test_auto_rotation.py)
+add_test(NAME ReaderAutomaticOrientation COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/hal_tilt/test_reader_rotation.py)
+add_test(NAME ReaderRotationIntegration COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/hal_tilt/test_reader_rotation_integration.py)
+add_test(NAME AutomaticRotationSettings COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/hal_tilt/test_rotation_settings.py)
+
 add_test(NAME NativeGrayscale
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_native_grayscale.py
     ${crosspoint_simulator_SOURCE_DIR} ${CMAKE_CXX_COMPILER} ${jpegdec_SOURCE_DIR}/src)

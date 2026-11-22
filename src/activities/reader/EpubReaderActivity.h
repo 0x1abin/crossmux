@@ -347,6 +347,10 @@ class EpubReaderActivity final : public ReaderActivity {
                               int pageNumber = -1) const;
   void renderStatusBar() const;
   void applyOrientation(uint8_t orientation);
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  bool automaticRotationInputAvailable() const override;
+  bool applyAutomaticOrientation(uint8_t desired) override;
+#endif
   void applyInitialOrientation() override;
   // The orientation the current layout was built for. The control center's
   // orientation tile can move SETTINGS.orientation while this reader sits on

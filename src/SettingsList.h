@@ -382,6 +382,10 @@ inline bool isHiddenOnDevice(const SettingInfo& s) {
     // must not drop the saved value.
     case StrId::STR_TILT_PAGE_TURN:
       return !halTiltSensor.isAvailable();
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    case StrId::STR_AUTO_ROTATE:
+      return !halTiltSensor.supportsAutomaticRotation();
+#endif
     // Clock settings need the RTC, as on the device (ClockSettingsActivity).
     case StrId::STR_CLOCK:
     case StrId::STR_CLOCK_FORMAT:

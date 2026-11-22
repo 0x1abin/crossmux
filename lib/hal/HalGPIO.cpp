@@ -355,6 +355,10 @@ bool HalGPIO::isToggleSwitchOn() const { return inputMgr.isToggleSwitchOn(); }
 
 bool HalGPIO::wasHomeKeyLongPressed() const { return inputMgr.wasHomeKeyLongPressed(); }
 
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+bool HalGPIO::isHomeKeyDown() const { return inputMgr.isHomeKeyDown(); }
+#endif
+
 bool HalGPIO::wasTouchTap(float& nx, float& ny) const { return inputMgr.wasTouchTap(nx, ny); }
 
 bool HalGPIO::wasTouchDown(float& nx, float& ny) const { return inputMgr.wasTouchPressedAt(nx, ny); }

@@ -115,6 +115,9 @@ class HalGPIO {
   bool wasHomeKeyPressed() const;
   bool wasHomeKeyTapped() const;
   bool wasHomeKeyLongPressed() const;
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  bool isHomeKeyDown() const;
+#endif
   bool wasTouchTap(float& nx, float& ny) const;
   bool wasTouchDown(float& nx, float& ny) const;
   bool wasCapacitivePagePressed() const { return capacitivePagePressed; }

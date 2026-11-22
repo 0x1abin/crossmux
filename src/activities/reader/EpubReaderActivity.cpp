@@ -1961,6 +1961,21 @@ void EpubReaderActivity::applyOrientation(const uint8_t orientation) {
   section.reset();
 }
 
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+bool EpubReaderActivity::automaticRotationInputAvailable() const {
+  return epub && !loadFailurePopup.isActive() && !overlayPopup.isActive() && fontPromptState == FontPromptState::Idle &&
+         !fontPreview.active() && ReaderActivity::automaticRotationInputAvailable();
+}
+
+bool EpubReaderActivity::applyAutomaticOrientation(const uint8_t desired) {
+  if (!epub || loadFailurePopup.isActive() || overlayPopup.isActive() || fontPromptState != FontPromptState::Idle ||
+      fontPreview.active())
+    return false;
+  applyOrientation(desired);  // Existing locked path preserves content offset before reflow.
+  return true;
+}
+#endif
+
 void EpubReaderActivity::toggleAutoPageTurn(const uint8_t requestedPageTurnRate) {
   if (requestedPageTurnRate == 0 || requestedPageTurnRate > MAX_PAGE_TURN_RATE) {
     automaticPageTurnActive = false;

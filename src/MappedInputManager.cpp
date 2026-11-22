@@ -511,6 +511,13 @@ bool MappedInputManager::wasHomeGesture() const {
   return gpio.hasHomeKey() ? homeAction == HomeButtonAction::Home : wasBottomEdgeUpSwipe();
 }
 
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+bool MappedInputManager::isHomeKeyInteracting() const {
+  return gpio.isHomeKeyDown() || gpio.wasHomeKeyPressed() || gpio.wasHomeKeyTapped() || gpio.wasHomeKeyLongPressed() ||
+         homeAction != HomeButtonAction::Ignore;
+}
+#endif
+
 bool MappedInputManager::wasLightPanelGesture() const {
   // The control center also serves touch boards without a frontlight.
   return hasTouch() && wasTopEdgeDownSwipe();
