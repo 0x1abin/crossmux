@@ -21,6 +21,14 @@ struct MenuResult {
   int action = -1;
   uint8_t orientation = 0;
   uint8_t pageTurnRate = 0;
+  // The menu edits some settings in place (night mode, frontlight) and leaves
+  // persisting them to the reader, which must restore the global typography
+  // snapshot before saving. This tells the reader a save is actually needed.
+  bool settingsDirty = false;
+  // Set by a screen that writes the device-level font family (the installer).
+  // A caller holding a reader session baseline refreshes it only when this is
+  // true, so a cancelled prompt or a failed download cannot rewrite it.
+  bool fontFamilyCommitted = false;
 };
 
 struct ChapterResult {

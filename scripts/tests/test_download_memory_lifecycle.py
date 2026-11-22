@@ -26,20 +26,40 @@ class DownloadMemoryLifecycleTest(unittest.TestCase):
             method(font, "void FontDownloadActivity::startWifiSelection()"),
             method(font, "void FontDownloadActivity::onExit()"),
             method(font, "void FontDownloadActivity::finishAutomaticFlow("),
+            # onExit() publishes a committed family into the result, so the
+            # fixture has to compile that too - as production code, like the
+            # rest of the extracted methods.
+            method(font, "void FontDownloadActivity::publishFontFamilyCommitted"),
         ])
         harness = r'''
 #include <cassert>
 #include <memory>
+#include <utility>
+#include <variant>
 #define LOG_ERR(...) ((void)0)
 #define LOG_DBG(...) ((void)0)
 #define LOG_INF(...) ((void)0)
 constexpr int WIFI_MODE_NULL = 0;
 bool childAllocationOk = true, locked = false;
 int launches = 0, restartRoute = -1;
-struct ActivityResult { bool isCancelled = false; };
+struct MenuResult {
+  int action = -1;
+  unsigned char orientation = 0;
+  unsigned char pageTurnRate = 0;
+  bool settingsDirty = false;
+  bool fontFamilyCommitted = false;
+};
+struct ActivityResult {
+  bool isCancelled = false;
+  std::variant<std::monostate, MenuResult> data;
+  ActivityResult() = default;
+  ActivityResult(MenuResult menu) : data{menu} {}
+};
 struct Activity {
   int renderer = 0, mappedInput = 0;
   bool finished = false;
+  ActivityResult result;
+  void setResult(ActivityResult&& r) { result = std::move(r); }
   void onExit() {}
   void finish() { finished = true; }
   void requestUpdate() {}
@@ -89,10 +109,12 @@ struct FontDownloadActivity : Activity {
   Purpose purpose_ = Purpose::Manage;
   ExitRoute exitRoute_ = ExitRoute::Home;
   bool readingStatsReleased_ = false;
+  bool fontFamilyCommitted_ = false;
   unsigned targetPointSize_ = 16;
   void startWifiSelection();
   void onExit();
   void finishAutomaticFlow(ExitRoute);
+  void publishFontFamilyCommitted();
 };
 '''
         checks = r'''
