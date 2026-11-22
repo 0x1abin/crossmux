@@ -67,6 +67,9 @@ stream fault.
 
 ## Local verification
 
+Application build/test results describe the combined migration candidate; each
+PR remains independently based on main. SDK harness results are listed separately.
+
 | Check | Result |
 | --- | --- |
 | Complete host CTest, combined candidate | 1585/1585 passed on macOS |
@@ -81,9 +84,11 @@ stream fault.
 | cppcheck | Version 2.20, default target passed |
 | Plus firmware with formal SDK pin | Passed; 122,076 B static RAM, 6,434,442 B linked Flash |
 | Shared C3 firmware with formal SDK pin | Passed; 68,368 B static RAM, 6,409,373 B linked Flash |
-| Offline image validation | Plus/C3 esptool image-info passed |
-| Read Pico firmware | Fixed Xtensa toolchain installed; first build in progress |
+| Offline image validation | Plus/C3/Read Pico esptool image-info passed |
+| Read Pico firmware with formal SDK pin | Passed; 81,832 B static RAM, 6,542,679 B linked Flash |
 
+Read Pico firmware.bin is 6,547,936 B in a 6,553,600 B application slot: only
+5,664 B remain. Preserve its partition policy and measure future Flash growth.
 Build sizes describe static/link usage, not runtime headroom. Other hardware
 environments and the entire `bin/ci-check` matrix have not been run. The bundled
 cppcheck 2.11 reported the unchanged typed `unique_ptr` arithmetic in
@@ -124,5 +129,6 @@ weaken workflow guards or claim remote CI passed from local test results.
 - Read across multiple diagnostic intervals on EPDiy hardware and record internal
   free/largest/minimum heap, PSRAM and stream errors. Keep this separate from the
   old vendor-backend acceptance record.
-- Finish Read Pico build/image validation and inspect the new remote CI runs.
-  Maintainer approval and physical feedback remain external requirements.
+- Obtain maintainer approval for the new code workflows and inspect their jobs
+  after execution. Title checks passed; code workflows currently report
+  action_required with no jobs. Physical feedback remains a separate requirement.
