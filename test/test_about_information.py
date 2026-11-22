@@ -134,6 +134,6 @@ with tempfile.TemporaryDirectory() as directory:
             sim_board=(sim/"src/BoardConfig.h").read_text()
             selected="\n".join(re.search(r"enum class "+name+r"[^}]+};",sim_board).group() for name in ["DisplayController","TouchController"])
         cpp.write_text(code.replace("@ENUMS@",selected).replace("@PRIMARY@",",".join(json.dumps(name) for name in primary)))
-        subprocess.run(["c++","-std=c++20","-Wall","-Wextra","-Werror",*("-D"+d for d in defines),"-I",str(ROOT/"src"),"-I",str(ui/"include"),str(cpp),str(ui/"src/FreeInkUI.cpp"),"-o",str(binary)],check=True)
+        subprocess.run(["c++","-std=c++20","-Wall","-Wextra","-Werror",*("-D"+d for d in defines),"-I",str(ROOT/"src"),"-I",str(ui/"include"),str(cpp),"-o",str(binary)],check=True)
         subprocess.run([str(binary)],check=True)
 print("Actual About fixed-slot rows, original INX order/values, pinned primary order, HAL/SD states and UINT64 formatting pass C3/S3/simulator branches")

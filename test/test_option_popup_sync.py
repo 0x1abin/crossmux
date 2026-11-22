@@ -6,6 +6,20 @@ import tempfile
 ROOT=Path(__file__).resolve().parents[1]
 SDK=ROOT/"freeink-sdk/libs/ui/FreeInkUI"
 
+def sdk_source(directory):
+    # Limit Clang's exception for the pinned SDK's unused keyboard tables to
+    # the SDK translation unit; production popup fixtures retain -Werror.
+    wrapper=Path(directory)/"FreeInkUI.cpp"
+    wrapper.write_text('#if defined(__clang__)\n'
+                       '#pragma clang diagnostic push\n'
+                       '#pragma clang diagnostic ignored "-Wunused-const-variable"\n'
+                       '#endif\n'
+                       f'#include "{SDK / "src/FreeInkUI.cpp"}"\n'
+                       '#if defined(__clang__)\n'
+                       '#pragma clang diagnostic pop\n'
+                       '#endif\n')
+    return wrapper
+
 def method(source,name):
     start=source.index(name);end=source.index("{",start)+1;depth=1
     while depth:
@@ -104,7 +118,7 @@ int main(){
 with tempfile.TemporaryDirectory() as directory:
     cpp=Path(directory)/"popup.cpp";binary=Path(directory)/"popup"
     cpp.write_text(code)
-    subprocess.run(["c++","-std=c++20","-Wall","-Wextra","-Werror","-I",str(SDK/"include"),str(cpp),str(SDK/"src/FreeInkUI.cpp"),"-o",str(binary)],check=True)
+    subprocess.run(["c++","-std=c++20","-Wall","-Wextra","-Werror","-I",str(SDK/"include"),str(cpp),str(sdk_source(directory)),"-o",str(binary)],check=True)
     subprocess.run([str(binary)],check=True)
 print("Production popup >16 options, viewport-only swipes, navigation follow, inherited held/release and touch single-dispatch pass")
 
@@ -213,6 +227,6 @@ int main(){
 with tempfile.TemporaryDirectory() as directory:
     cpp=Path(directory)/"render.cpp";binary=Path(directory)/"render"
     cpp.write_text(code)
-    subprocess.run(["c++","-std=c++20","-Wall","-Wextra","-Werror","-I",str(ROOT/"src"),"-I",str(SDK/"include"),str(cpp),str(SDK/"src/FreeInkUI.cpp"),"-o",str(binary)],check=True)
+    subprocess.run(["c++","-std=c++20","-Wall","-Wextra","-Werror","-I",str(ROOT/"src"),"-I",str(SDK/"include"),str(cpp),str(sdk_source(directory)),"-o",str(binary)],check=True)
     subprocess.run([str(binary)],check=True,stdout=subprocess.DEVNULL)
 print("Full production popup renders bounded contiguous hit tables in both orientations; swipe, follow and actual SDK touch dispatch pass")

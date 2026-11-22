@@ -31,8 +31,25 @@ def run_cpp(program, include_dirs=(), defines=(), extra_sources=()):
             profile += ('namespace UiHighDpiProfile {bool testNativeLayout=true; '
                         'bool active(){return testNativeLayout;}}\n')
         cpp.write_text(profile + program)
+        # The pinned SDK has unused legacy keyboard tables under Clang. Keep
+        # fixture warnings strict and scope the exception to the SDK source.
+        sources = []
+        for source in extra_sources:
+            if Path(source) == ROOT / 'freeink-sdk/libs/ui/FreeInkUI/src/FreeInkUI.cpp':
+                wrapper = Path(directory) / 'FreeInkUI.cpp'
+                wrapper.write_text('#if defined(__clang__)\n'
+                                   '#pragma clang diagnostic push\n'
+                                   '#pragma clang diagnostic ignored "-Wunused-const-variable"\n'
+                                   '#endif\n'
+                                   f'#include "{source}"\n'
+                                   '#if defined(__clang__)\n'
+                                   '#pragma clang diagnostic pop\n'
+                                   '#endif\n')
+                sources.append(wrapper)
+            else:
+                sources.append(source)
         subprocess.run(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
-                        *('-I'+str(path) for path in include_dirs), *('-D'+define for define in defines), str(cpp), *map(str, extra_sources), '-o', str(exe)], check=True)
+                        *('-I'+str(path) for path in include_dirs), *('-D'+define for define in defines), str(cpp), *map(str, sources), '-o', str(exe)], check=True)
         subprocess.run([str(exe)], check=True)
 
 
@@ -124,7 +141,8 @@ template<class... Args> void logDebug(Args&&...) {}
 #define LOG_DBG(...) logDebug(__VA_ARGS__)
 unsigned long millis() { static unsigned long value=0;return ++value; }
 struct CrossPointSettings { enum { INX,CLASSIC,LYRA };int uiTheme=INX; } SETTINGS;
-struct MappedInputManager {
+class MappedInputManager {
+ public:
  enum class Button { Back,Confirm,NavNext,NavPrevious,Count };
  enum class SwipeDir { None,Up,Down,Left,Right };
  bool touch=true; Button pressed=Button::Count,held=Button::Count,extraHeld=Button::Count,released=Button::Count;
@@ -743,7 +761,6 @@ struct MappedInputManager {
   bool wasPressed(Button b) { return pressed==b; }
   bool isPressed(Button b) { return held==b; }
 };
-struct { bool standbyShortcutEnabled=false; } SETTINGS;
 struct ActivityManager {
   Activity* currentActivity=nullptr;
   GfxRenderer renderer;
@@ -1350,10 +1367,8 @@ int main() {
 #include <cstring>
 #include <initializer_list>
 struct Rect { int x, y, width, height; };
-constexpr int SMALL_FONT_ID = 1, STATUS_NUMERIC_FONT_ID = 1, NOTOSERIF_12_FONT_ID = 2, UI_12_FONT_ID = 3, kIconGap = 8, kRowPadding = 20;
+constexpr int SMALL_FONT_ID = 1, NOTOSERIF_12_FONT_ID = 2, UI_12_FONT_ID = 3, kIconGap = 8, kRowPadding = 20;
 namespace EpdFontFamily { enum Style { REGULAR, BOLD }; }
-struct CrossPointSettings { enum class HIDE_BATTERY_PERCENTAGE { HIDE_ALWAYS }; };
-struct { CrossPointSettings::HIDE_BATTERY_PERCENTAGE hideBatteryPercentage{}; } SETTINGS;
 namespace InxMetrics { struct { int batteryWidth=20, batteryHeight=10, batteryBarHeight=24, contentSidePadding=20; } values; }
 struct GfxRenderer {
   mutable Rect clip{};
