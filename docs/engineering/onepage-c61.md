@@ -1,12 +1,15 @@
 # OnePage ESP32-C61
 
-Status: **bring-up in progress; Windows build blocked**. The reference CrossMux
-nightly app was flashed to the unit on 2026-11-03 and verified; it boots with
-display, SD, fonts, PSRAM and all seven keys working. One Power-key sleep and
-USB-reconnect wake were logged; the full three-cycle sleep test was stopped at
-the user's request, and battery/charging has not been measured. Build and
-physical acceptance are recorded separately; a successful compile or flash is
-not full hardware acceptance.
+Status (2026-11-23): **port rebased onto current main; local firmware built and
+hash-verified; Draft PR open; this PR's firmware not yet flashed; physical
+acceptance pending**. The reference CrossMux nightly app was flashed to the unit
+on 2026-11-03 and verified; it boots with display, SD, fonts, PSRAM and all
+seven keys working. One Power-key sleep and USB-reconnect wake were logged; the
+full three-cycle sleep test was stopped at the user's request, and
+battery/charging has not been measured. Build and physical acceptance are
+recorded separately; a successful compile or flash is not full hardware
+acceptance. The Draft PR must stay Draft while the SDK dependency is unmerged
+and this branch's own image lacks physical acceptance.
 
 Scope decision (2026-11-01): the first slice is the basic reading link —
 display, seven keys, SD, battery/charging, and deep sleep/wake. BLE page-turner
@@ -64,12 +67,20 @@ measured.
 
 | Item | Revision |
 |---|---|
-| CrossMux base | `6b5566c844667857acebfe565d373423cdd16e06` |
-| CrossMux bring-up commit | `abd991a` on `codex/port-device-bsp` |
-| FreeInk SDK gitlink | `65323afd0cbfa7bcfbabafd509248d024ceaab14` (unchanged) |
-| FreeInk SDK local branch | `codex/onepage-c61` at `ceeca4b` (USB polarity, SD rail, EPD reset, C61 library-pass device default); not yet in the gitlink |
-| Toolchain | pioarduino Core 6.2.0, Espressif32 platform 55.3.37 for `onepage` |
+| CrossMux PR base (`main`) | `27d54817cd7c0ba4f6b87d034477727e82235f40` (2026-11-21) |
+| CrossMux branch / head | `codex/port-device-bsp` @ `b0e96f35871169ba9eeb72a054bb512a28c5978e` (26 commits vs PR base) |
+| CrossMux PR | [0x1abin/crossmux#451](https://github.com/0x1abin/crossmux/pull/451) — open, **Draft**, mergeable |
+| FreeInk SDK gitlink | `240e699b09e9a1358de2292e44b88596b19ae3ef` — current `0x1abin/freeink-sdk:main`; unchanged from PR base |
+| SDK contribution branch | `uu548/freeink-sdk:codex/onepage-c61` @ `0a7233630db97a366471197c5bd07bcef4c129b6`, matches [freeink-sdk#50](https://github.com/0x1abin/freeink-sdk/pull/50) head (open, Draft); **not** the gitlink — do not pin a personal-fork-only commit as default dependency |
+| Toolchain | pioarduino Core 6.2.0, Espressif32 platform 55.03.37 for `onepage` (all other targets stay on the base pin) |
 | Board definition | `boards/onepage-c61.json` |
+| Local build artifact | `.pio/build/onepage/firmware.bin`, 6,692,048 B, SHA-256 `FCEEED8A5310D90F59E4BD68DBE23CE8BA91D623315BE5F55F17E25DEBE13FC1` (matches PR record; not yet flashed) |
+
+Historical revisions (superseded, kept as evidence): the original bring-up used
+CrossMux base `6b5566c844667857acebfe565d373423cdd16e06`, bring-up commit
+`abd991a`, SDK gitlink `65323afd0cbfa7bcfbabafd509248d024ceaab14` and SDK local
+branch `codex/onepage-c61` at `ceeca4b`. The Windows build blocker below was
+recorded against that earlier snapshot.
 
 The `onepage` environment overrides the platform to 55.03.37 because 55.3.311
 regressed the Arduino/IDF hybrid pass on C61: its final link only saw the
@@ -102,16 +113,22 @@ missing and tries to clone its nested `lucide` submodule. It is the upstream
 IDF escape hatch, not a source change. `UV_CACHE_DIR` and `TEMP` must point
 inside the workspace because the host sandbox denies the user-profile cache.
 
-Current Windows blocker (2026-11-02): the hybrid parent pass compiles every IDF
-and project library, but the final link uses `.dummy` as the project source, so
-`framework-arduinoespressif32.a(main.cpp.o)` cannot resolve `setup()`/`loop()`.
-The `src` objects are never compiled because the hybrid pass replaces
-`PROJECT_SRC_DIR` with `.dummy` and the delegate `pio run` pass then links the
-same placeholder. Linux CI is the intended reproducible build; the Windows
-host additionally needed local-only platform patches (command-line launcher for
-`ldgen`, `SCons.Tool.__path__` fallback, `NodeList` handling, keeping `-D`
-flags in the hybrid pass). Those patches live under `.platformio/`, not in the
-repository, and are not part of the PR.
+Build status (2026-11-23): a plain Arduino pass produced `.pio/build/onepage/firmware.bin`
+(6,692,048 B, SHA-256 `fceeed8a…13fc1`, matching the PR record). This file has
+**not** been flashed. The canonical `pio run -e onepage` hybrid path still hits
+pioarduino/SCons defects on Windows; Linux CI (`build-onepage` job) is the
+intended reproducible build.
+
+Historical Windows blocker (2026-11-02, superseded by the Arduino-pass
+artifact above): the hybrid parent pass compiled every IDF and project library,
+but the final link used `.dummy` as the project source, so
+`framework-arduinoespressif32.a(main.cpp.o)` could not resolve `setup()`/`loop()`.
+The `src` objects were never compiled because the hybrid pass replaced
+`PROJECT_SRC_DIR` with `.dummy` and the delegate `pio run` pass then linked the
+same placeholder. The Windows host additionally needed local-only platform
+patches (command-line launcher for `ldgen`, `SCons.Tool.__path__` fallback,
+`NodeList` handling, keeping `-D` flags in the hybrid pass). Those patches live
+under `.platformio/`, not in the repository, and are not part of the PR.
 
 Do not flash until the device, image, partition offsets and a verified backup
 are recorded in this document.
@@ -209,24 +226,43 @@ the CrossMux worktree and must not be committed.
 
 | Check | Target / revision | Status | Evidence |
 |---|---|---|---|
-| Compile `onepage` | CrossMux branch + SDK working tree, platform 55.03.37 | failed | Windows platform defects; libraries compile, app link is blocked (see build blocker above) |
+| Compile `onepage` (Arduino pass) | CrossMux `b0e96f35` + pinned SDK `240e699`, platform 55.03.37 | passed (local) | `.pio/build/onepage/firmware.bin`, 6,692,048 B, SHA-256 `fceeed8a…13fc1`, matches PR record |
+| Compile `onepage` (canonical hybrid `pio run -e onepage`) | Windows host, platform 55.03.37 | failed | Windows pioarduino/SCons defects (historical blocker above); Linux CI `build-onepage` is the intended path |
+| Flash headroom | app0 slot `0x6C0000` (6.75 MiB) | at risk | 6,692,048 / 7,077,888 B ≈ 94.5%; follow-up trimming may be needed before release |
 | Reference image | CrossMux nightly `83b0f810…`, app extracted | flashed | app0 6,821,409 B, SHA-256 `5c7426…adb0bb`, 80 MHz DIO, verify digest matched |
 | Boot / display / SD / PSRAM | OnePage V1, reference image | passed (serial) | `onepage` detected, SSD1677 refreshes, SD card + fonts, PSRAM 2 MB, Home activity |
 | Front/side keys | OnePage V1, reference image | passed (user) | all seven keys reported working; Power logged `Power button held 11ms, sleeping` |
+| This PR's firmware flashed/booted | OnePage V1, `fceeed8a…13fc1` | pending | COM9 busy at 2026-11-23 check; not yet written; reference image only so far |
 | Battery / charging | OnePage V1, reference image | pending | not measured |
 | Sleep/wake x3 | OnePage V1, reference image | partial | one Power sleep + USB-reconnect wake logged; 3-cycle test stopped at user request |
 | BLE page turner | OnePage V1 | not applicable (first slice) | deferred by scope decision |
 | Current measurement | OnePage V1 | pending | no measurement |
+| SDK PR #50 merge / gitlink pin | freeink-sdk `0a72336` → `0x1abin:main` | pending | Draft, unmerged; CrossMux gitlink stays `240e699` meanwhile |
 
-## Open items
+## Open items (2026-11-23)
 
+- Flash this branch's own `firmware.bin` (`fceeed8a…13fc1`) to app0 `0x10000`
+  on COM9 and verify; then collect boot/display/SD/keys/battery/sleep evidence
+  for **this** revision. COM9 was busy at the 2026-11-23 pre-flash check and must
+  be released first. The reference app flashed on 2026-11-03 does not validate
+  this branch.
 - The ESP32-C61HR2 identity and 16 MB flash are confirmed by esptool. The PCB
   revision marking still needs a visual check against the V1 2026-08-19
   schematic.
-- A full 16 MB backup exists and is hash-recorded above. The reference app was
-  flashed and verified on 2026-11-03; our own build still has no verified image.
+- A full 16 MB backup exists (16,777,216 B, SHA-256 `bf9b62ef…554c69ae`,
+  re-verified 2026-11-23) and is hash-recorded above. Restore command is in
+  `device-backups/README.md`; the backup lives outside the worktree and must not
+  be committed.
 - Confirm whether the BLE page-turner and full CrossMux feature set are in
-  scope for this port.
+  scope for this port (first slice excludes BLE).
 - Confirm U12 `ST` (USB detect) and U3 `CE` (charge enable) polarity against
   the populated board. The schematic confirms the pin assignments but not the
-  populated strapping or the exact charger variant.
+  populated strapping or the exact charger variant. The CrossMux HAL now reads
+  USB detect using `BoardProfile::usbDetectActiveHigh` with a matching pull; the
+  SDK-side profile fix lives in freeink-sdk#50, which is still a Draft.
+- Keep CrossMux PR #451 as Draft until freeink-sdk#50 is merged and the gitlink
+  is repinned to the integrated commit available from the configured SDK
+  remote, and until this revision's physical acceptance is recorded. Do not
+  pin the personal-fork commit `0a72336` as the default gitlink.
+- App-slot usage is ~94.5%; assess trimming before any release/Nightly
+  enrollment (not part of this PR's first slice).
