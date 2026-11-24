@@ -77,8 +77,11 @@ pull-down. Deep-sleep preparation writes the GSL halt command (`0x88` to
 register `0xE0`), releases its I²C pins and holds touch reset low. The HAL logs
 a failed halt write; GPIO8 remains the power-button wake source.
 
-The target retains the prebuilt `dio_opi` Arduino/TinyUSB graph for USB Drive.
-The SDK BLE stub is accepted for this model. The vector-font profile retains
+The target retains the prebuilt `dio_opi` Arduino/TinyUSB graph for USB Drive and
+takes the BLE page turner from `s3_ble_psram` (NimBLE host and stack in PSRAM) —
+the same split as the X4 Pro and X4 Classic. Linking the SDK BLE stubs instead
+compiles `FREEINK_CAP_BLE_HID_HOST` out, which removes the Bluetooth settings and
+the in-reader page-turner toggle. The vector-font profile retains
 its 24 KiB loop stack and 16 KiB render stack. Non-vector builds use FreeInkUI's
 weak 16 KiB loop default; the linked getter must be checked after rebuilding.
 measure its high-water mark during WeRead login/download, EPUB indexing, network

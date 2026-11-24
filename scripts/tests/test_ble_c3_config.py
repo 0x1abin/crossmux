@@ -206,14 +206,10 @@ int main() {
                     self.assertNotIn("configure_nimble_psram.py", scripts)
                     self.assertNotIn("xTaskCreatePinnedToCore", flags)
                     continue
-                if "FREEINK_DEVICE_EEGO_A4=1" in flags:
-                    self.assertNotIn("FREEINK_CAP_BLE_HID_HOST=1", flags)
-                    self.assertNotIn("NimBLE-Arduino", libraries)
-                    self.assertNotIn("patch_ble_keyboard_host.py", scripts)
-                    self.assertIn("-DFREEINK_CAP_USB_MSC=1", flags)
-                    self.assertFalse(resolve(section, "custom_sdkconfig"))
-                    self.assertEqual(resolve(section, "board_build.arduino.memory_type"), "dio_opi")
-                    continue
+                # EEGO A4 used to be the one exception here (upstream support
+                # linked the SDK BLE stubs to keep the prebuilt TinyUSB core).
+                # It now takes the same S3 USB-MSC split as the X4 Pro / X4
+                # Classic, so the generic S3 assertions below cover it.
                 self.assertIn("-DFREEINK_CAP_BLE_HID_HOST=1", flags)
                 self.assertIn("h2zero/NimBLE-Arduino @ 2.5.1", libraries)
                 self.assertIn("patch_ble_keyboard_host.py", scripts)
