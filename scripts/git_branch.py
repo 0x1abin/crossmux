@@ -99,7 +99,10 @@ def inject_version(env):
         version_env.Append(CPPDEFINES=[('CROSSPOINT_VERSION', f'\\"{version_string}\\"')])
         return version_env.Object(node)
 
-    env.AddBuildMiddleware(add_version)
+    # Apply the define to the shared environment instead of returning a cloned
+    # Object node: a per-node Object creates a second action for the same target,
+    # which SCons rejects ("Two environments with different actions").
+    env.Append(CPPDEFINES=[('CROSSPOINT_VERSION', f'\\"{version_string}\\"')])
     print(f'CrossPoint build version: {version_string}')
 
 
