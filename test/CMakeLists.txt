@@ -216,6 +216,8 @@ add_test(NAME TapZoneChapter COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx
 
 add_test(NAME TouchPageTurnSettings COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/touch_page_turn/test_page_turn_settings.py)
 
+add_test(NAME ReaderMenuDefaults COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_reader_menu_defaults.py)
+
 add_test(NAME SettingsApiKeys COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/settings_api/test_settings_api_keys.py)
 
 add_test(NAME HalTiltGestures

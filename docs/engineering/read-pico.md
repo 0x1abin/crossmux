@@ -121,7 +121,9 @@ acceptance remain separate from build and package verification.
   picker advertises only its actual 12 pt face; installed SD families expose
   their own sizes. Network and explicit BLE preparation do not immediately
   reload released fonts.
-- Toolbar is the Read Pico first-boot default and respects saved settings.
+- Toolbar is the Read Pico reader-menu default on first boot, after a settings
+  reset, and when an older settings file omits `readerMenuStyle` or stores an
+  invalid value. Saved List and Toolbar choices are preserved.
   AirPage requests the board capability: Read Pico uses native sixteen-tone image output.
 
 ### Native sixteen-level images — 2026-10-01

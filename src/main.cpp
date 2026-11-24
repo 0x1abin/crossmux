@@ -986,9 +986,6 @@ void setup() {
   HalSystem::checkPanic();
 
   const bool settingsLoaded = SETTINGS.loadFromFile();
-#if FREEINK_DEVICE_READPICO
-  if (!settingsLoaded) SETTINGS.readerMenuStyle = CrossPointSettings::READER_MENU_TOOLBAR;
-#endif
   const auto onboardingMode =
       settingsLoaded ? LanguageSelectActivity::Mode::Upgrade : LanguageSelectActivity::Mode::Initial;
   const bool requiresOnboarding = CrossPointSettings::requiresOnboarding(SETTINGS.onboardingVersion);
