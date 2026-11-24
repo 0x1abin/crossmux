@@ -13,6 +13,9 @@ The CrossMux submodule pins the reviewed FreeInk SDK revision.
   8-bit LCD bus and Plus-specific bezel insets. Inx uses the native high-DPI
   layout. The other themes use the upstream 1.5× UI scale, as on Read Pico.
   The battery glyph and percentage share the scaled text metrics.
+- Toolbar is the reader-menu default on first boot, after a settings reset,
+  and when an older settings file omits `readerMenuStyle` or stores an invalid
+  value. Saved List and Toolbar choices are preserved, as on Read Pico.
 - Sleep images use the original Read Pico layout in native pixels. The panel
   gets a full white refresh before a replacement image. Quick Resume and
   transparent overlays retain the previous frame.
