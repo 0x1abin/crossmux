@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -125,6 +126,12 @@ class BookMetadataCache {
   bool load();
   SpineEntry getSpineEntry(int index);
   TocEntry getTocEntry(int index);
+  // Stream TOC entries in index order starting at fromIndex. Entries are stored
+  // back-to-back in book.bin, so one LUT read locates a contiguous run: callers that
+  // need many (or all) entries read them at SD block speed instead of paying a LUT
+  // seek plus an entry seek per index. `fn` returns false to stop early. Returns false
+  // on I/O or a truncated cache (the cache is invalidated in that case).
+  bool forEachTocEntry(const std::function<bool(int index, const TocEntry& entry)>& fn, int fromIndex = 0);
   // Returns whether the in-RAM cache contains the requested cumulative byte size.
   bool getCumulativeSize(int index, uint32_t& size) const;
   bool getLinear(int index, bool& linear) const;

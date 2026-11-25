@@ -163,4 +163,16 @@ inline void writeString(BufferedFileWriter& out, const std::string& s) {
   return true;
 }
 
+// Reads into a caller-owned string, reusing its capacity instead of allocating a fresh
+// one per call. A streaming pass over thousands of entries needs this: readString above
+// would malloc/free three times per entry, and on the no-PSRAM builds that churn is the
+// only real cost of the pass. The target may be left partly overwritten on failure,
+// which is fine for a scratch buffer whose contents are re-read every iteration.
+[[nodiscard]] inline bool readStringInto(BufferedFileReader& in, std::string& s, const uint32_t maxLength) {
+  uint32_t len = 0;
+  if (!readPod(in, len) || len > maxLength) return false;
+  s.resize(len);
+  return len == 0 || in.read(s.data(), len) == len;
+}
+
 }  // namespace serialization
