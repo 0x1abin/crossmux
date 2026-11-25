@@ -22,20 +22,27 @@ class Imu {
   static int reads;
   static bool readOk;
   bool begin() { return true; }
-  bool hasGyroscope() const { return !FREEINK_DEVICE_READPICO; }
+  bool hasGyroscope() const { return !FREEINK_DEVICE_READPICO && !FREEINK_DEVICE_METALIO_EINK4_PLUS; }
   bool wake() { return true; }
   bool sleep() { return true; }
   bool read(Sample& out) { ++reads; out=sample; return readOk; }
 };
 ''')
-        for pico in (0, 1):
-            binary = root / f"tilt-{pico}"
+        for pico, plus in ((0, 0), (1, 0)):
+            binary = root / f"tilt-{pico}-{plus}"
             subprocess.run(["c++", "-std=c++17", f"-DFREEINK_DEVICE_READPICO={pico}",
+                            f"-DFREEINK_DEVICE_METALIO_EINK4_PLUS={plus}",
                             "-I" + str(root), "-I" + str(ROOT / "lib/hal"),
                             str(ROOT / "lib/hal/HalTiltSensor.cpp"),
                             str(ROOT / "test/hal_tilt/gestures.cpp"), "-o", str(binary)], check=True, env=env)
             subprocess.run([str(binary)], check=True)
-        print("Accelerometer cadence/baselines and existing gyro gestures passed")
+        binary = root / "rotation"
+        subprocess.run(["c++", "-std=c++17", "-DFREEINK_DEVICE_READPICO=0",
+                        "-DFREEINK_DEVICE_METALIO_EINK4_PLUS=1", "-I" + str(root),
+                        "-I" + str(ROOT / "lib/hal"), str(ROOT / "lib/hal/HalTiltSensor.cpp"),
+                        str(ROOT / "test/hal_tilt/rotation.cpp"), "-o", str(binary)], check=True, env=env)
+        subprocess.run([str(binary)], check=True)
+        print("ReadPico/Plus accelerometer, gyro regression and shared rotation sampling passed")
 
 
 if __name__ == "__main__":

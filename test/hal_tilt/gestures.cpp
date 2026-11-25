@@ -17,7 +17,7 @@ int main() {
   };
   auto noEvent = [&] { assert(!sensor.wasTiltedForward() && !sensor.wasTiltedBack()); };
   update(1000);
-#if FREEINK_DEVICE_READPICO
+#if FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS
   Imu::sample.ax = 1;
   update(1700);  // first sample after wake establishes the baseline
   noEvent();

@@ -35,6 +35,10 @@ class XtcReaderActivity final : public ReaderActivity {
   bool handleFormatInput() override;
   void renderBook() override;
   void applyInitialOrientation() override;
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  // Fixed-layout pages enter in portrait regardless of the EPUB preference.
+  bool automaticRotationInputAvailable() const override { return false; }
+#endif
 
  public:
   explicit XtcReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string bookPath,

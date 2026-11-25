@@ -16,6 +16,11 @@
 #include "CrossPointState.h"
 #include "EpubReaderActivity.h"
 #include "ReaderUtils.h"
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+#include <HalTiltSensor.h>
+
+#include "ReaderAutoRotation.h"
+#endif
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "XtcReaderActivity.h"
@@ -319,6 +324,41 @@ void ReaderActivity::rotateOrientation(const int delta) {
   SETTINGS.saveToFile();
   ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
 }
+
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+bool ReaderActivity::automaticRotationInputAvailable() const {
+  bool gesture = mappedInput.wasAnyPressed() || mappedInput.wasAnyReleased() || mappedInput.wasScreenTouchReleased() ||
+                 mappedInput.hasRemoteClick() || mappedInput.isHomeKeyInteracting();
+  for (uint8_t i = 0; i < MappedInputManager::kButtonCount && !gesture; ++i)
+    gesture = mappedInput.isPressed(static_cast<MappedInputManager::Button>(i));
+  int x = 0, y = 0;
+  gesture = gesture || mappedInput.isScreenTouchHeld(x, y) || mappedInput.wasScreenTouchPressed(x, y);
+  const ReaderRotationContext context{SETTINGS.autoRotate != 0,
+                                      pageRendered.load(std::memory_order_acquire),
+                                      RenderLock::peek(),
+                                      inputOverPage(),
+                                      gesture,
+                                      SETTINGS.orientation,
+                                      SETTINGS.orientation};
+  return readerRotationInputAvailable(context);
+}
+
+void ReaderActivity::handleAutoRotation() {
+  if (!automaticRotationInputAvailable()) {
+    halTiltSensor.cancelOrientationCandidate();
+    return;
+  }
+  uint8_t desired = 0;
+  if (!halTiltSensor.takeOrientation(desired) || desired > 3 || desired == SETTINGS.orientation) return;
+  if (applyAutomaticOrientation(desired)) requestUpdate();
+}
+
+bool ReaderActivity::applyAutomaticOrientation(const uint8_t desired) {
+  RenderLock lock(*this);
+  rotateOrientation(static_cast<int>(desired) - SETTINGS.orientation);
+  return true;
+}
+#endif
 
 void ReaderActivity::toggleFrontlight() {
   if (!Frontlight.present()) return;

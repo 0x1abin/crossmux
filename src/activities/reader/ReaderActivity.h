@@ -71,6 +71,11 @@ class ReaderActivity : public Activity {
   // and toggle the frontlight. Shared by all readers; orientation reflows are
   // handled by each reader's own rendering pass on the next update.
   void rotateOrientation(int delta);
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  virtual bool automaticRotationInputAvailable() const;
+  void handleAutoRotation();
+  virtual bool applyAutomaticOrientation(uint8_t desired);
+#endif
   void toggleFrontlight();
 
   virtual void renderBook() = 0;
