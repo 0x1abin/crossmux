@@ -37,3 +37,20 @@ target_include_directories(GifBmpTest PRIVATE
   ${REPO_ROOT}/lib/Memory)
 target_link_libraries(GifBmpTest PRIVATE crosspoint_test_common GTest::gtest_main animatedgif_host)
 gtest_discover_tests(GifBmpTest)
+
+add_executable(GifFramebufferTest GifFramebufferTest.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/converters/GifToFramebufferConverter.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/converters/ImageToFramebufferDecoder.cpp)
+
+target_include_directories(GifFramebufferTest PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/framebuffer_stubs
+  ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+  ${REPO_ROOT}/test/chapter_html_slim_parser/stubs
+  ${REPO_ROOT}/lib/Epub/Epub/converters
+  ${REPO_ROOT}/lib/GifSupport
+  ${REPO_ROOT}/lib/GfxRenderer
+  ${REPO_ROOT}/lib/Memory)
+
+target_link_libraries(GifFramebufferTest PRIVATE crosspoint_test_common GTest::gtest_main animatedgif_host)
+
+gtest_discover_tests(GifFramebufferTest)
