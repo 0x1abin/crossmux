@@ -11,6 +11,11 @@ ROOT = Path(__file__).resolve().parents[2]
 API = ROOT / "lib/WeReadWebApi/src"
 ACTIVITY = ROOT / "src/activities/apps/weread/webapi/WeReadActivity.cpp"
 SAX = ROOT / "freeink-sdk/libs/network/JsonSax"
+COMPILER_MACROS = subprocess.check_output(
+    ["c++", "-dM", "-E", "-x", "c++", "-"], input="", text=True)
+GCC_WARNING_FLAGS = (["-Wno-class-memaccess"]
+                     if "#define __GNUC__ " in COMPILER_MACROS and "#define __clang__ " not in COMPILER_MACROS
+                     else [])
 
 
 def run(program, headers=None, sources=(), defines=()):
@@ -22,7 +27,7 @@ def run(program, headers=None, sources=(), defines=()):
         cpp.write_text(program)
         binary = directory / "check"
         subprocess.run([
-            "c++", "-std=c++20", "-Wall", "-Wextra", "-Werror", "-fno-exceptions", "-Wno-class-memaccess",
+            "c++", "-std=c++20", "-Wall", "-Wextra", "-Werror", "-fno-exceptions", *GCC_WARNING_FLAGS,
             "-I" + str(directory), "-I" + str(API), "-I" + str(SAX / "include"),
             *["-D" + value for value in defines], str(cpp), *map(str, sources), "-o", str(binary),
         ], check=True)
